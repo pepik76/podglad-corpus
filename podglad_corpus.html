@@ -12,7 +12,6 @@ html,body{margin:0;height:100%;font-family:"Segoe UI",Roboto,Arial,sans-serif;co
 header{display:flex;gap:8px;padding:8px;background:var(--panel);border-bottom:3px solid var(--line);flex-wrap:wrap;align-items:center}
 button,.btn{font:inherit;font-weight:700;font-size:16px;min-height:48px;padding:0 14px;border:2px solid var(--line);background:#fff;color:var(--ink);border-radius:10px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;white-space:nowrap}
 button:active,.btn:active{background:var(--hi)}
-.pri{background:var(--acc);color:#fff;border-color:var(--acc)}
 .on{background:var(--ink);color:#fff}
 #title{flex:1;min-width:120px;font-weight:700;font-size:15px;overflow:hidden;text-overflow:ellipsis}
 #stage{position:relative;flex:1;min-height:0}
@@ -30,7 +29,6 @@ button:active,.btn:active{background:var(--hi)}
 #cubebox{position:absolute;top:8px;right:8px;width:112px;height:112px;z-index:4}
 #cube canvas{width:112px;height:112px;display:block;cursor:pointer}
 #home{position:absolute;left:-14px;top:-6px;width:38px;min-height:38px;padding:0;border-radius:19px;font-size:22px;line-height:1}
-#tools .grp{display:flex;gap:6px;flex-wrap:wrap}
 #expl{display:flex;align-items:center;gap:8px;font-weight:700;flex:1;min-width:220px}
 #expl input{flex:1;height:40px;accent-color:var(--acc)}
 #list{position:absolute;top:0;bottom:0;left:0;width:min(340px,88%);background:var(--panel);border-right:3px solid var(--line);overflow:auto;transform:translateX(-102%);transition:transform .2s;z-index:5}
@@ -39,16 +37,7 @@ button:active,.btn:active{background:var(--hi)}
 #list button{width:100%;justify-content:flex-start;border-radius:0;border-width:0 0 1px;min-height:46px;font-weight:600;font-size:15px;text-align:left;white-space:normal}
 #list button.sel{background:var(--hi)}
 #list button.hid{opacity:.4;text-decoration:line-through}
-#drop{position:absolute;inset:0;display:flex;flex-direction:column;gap:14px;align-items:center;justify-content:center;text-align:center;padding:20px;pointer-events:none}
-#drop h2{margin:0;font-size:26px}
-#drop .btn,#drop button{pointer-events:auto}
-body.drag #stage{outline:6px dashed var(--acc);outline-offset:-6px}
-#diag{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;z-index:10;padding:10px}
-#diag.open{display:flex}
-#dbox{background:#fff;border:3px solid var(--line);border-radius:12px;margin:auto;width:min(900px,100%);max-height:100%;display:flex;flex-direction:column}
-#dbox .hd{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;border-bottom:2px solid var(--line);font-weight:700}
-#dbox pre{margin:0;padding:12px;overflow:auto;font:13px/1.4 Consolas,monospace;white-space:pre-wrap;word-break:break-all}
-input[type=file]{display:none}
+#msg{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;padding:20px;pointer-events:none;font-size:20px;font-weight:700}
 label.chk{display:inline-flex;align-items:center;gap:8px;min-height:48px;padding:0 12px;border:2px solid var(--line);border-radius:10px;font-weight:700;font-size:16px;background:#fff;cursor:pointer}
 label.chk input{width:24px;height:24px;accent-color:var(--acc)}
 #labs{position:absolute;inset:0;pointer-events:none;overflow:hidden}
@@ -60,10 +49,7 @@ label.chk input{width:24px;height:24px;accent-color:var(--acc)}
 <body>
 <div id="app">
  <header>
-  <label class="btn pri" for="f">Wczytaj .s3d</label><input id="f" type="file">
-  <button id="bTest">Załaduj testową szafkę</button>
   <button id="bList">Lista</button>
-  <button id="bDiag">Tryb diagnostyczny</button>
   <div id="title">Brak projektu</div>
  </header>
  <div id="stage">
@@ -72,7 +58,7 @@ label.chk input{width:24px;height:24px;accent-color:var(--acc)}
   <div id="cubebox"><div id="cube"></div><button id="home" title="Widok domyślny">⌂</button></div>
   <div id="info"></div>
   <aside id="list"></aside>
-  <div id="drop"><h2>Przeciągnij tutaj plik .s3d</h2><div>albo użyj przycisków u góry. Plik nie opuszcza Twojego urządzenia.</div></div>
+  <div id="msg">Podaj parametr ?id= w adresie</div>
  </div>
  <div id="tools">
   <section><h5>Zaznaczanie</h5><div class="row">
@@ -90,7 +76,6 @@ label.chk input{width:24px;height:24px;accent-color:var(--acc)}
   <section><h5>Rozstrzelenie</h5><div id="expl"><input id="ex" type="range" min="0" max="100" value="0"></div></section>
  </div>
 </div>
-<div id="diag"><div id="dbox"><div class="hd"><span>Podgląd struktury pliku</span><span><button id="bCopy">Kopiuj</button> <button id="bClose">Zamknij</button></span></div><pre id="dtxt">Nie wczytano jeszcze pliku.</pre></div></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
@@ -100,7 +85,7 @@ label.chk input{width:24px;height:24px;accent-color:var(--acc)}
 const S=0.001, $=id=>document.getElementById(id);
 let anim=null,cubeRen,cubeScene,cubeCam,cubeZones=[],cubeHover=null;
 let labEls=[],dimGroup=null,dimGroups=[],curG=null,curCi=0;
-let scene,cam,ren,ctl,group,boards=[],sel=-1,selSet=new Set(),selLevel='board',xray=false,center=new THREE.Vector3(),radius=1,diagText='Nie wczytano jeszcze pliku.';
+let scene,cam,ren,ctl,group,boards=[],sel=-1,selSet=new Set(),selLevel='board',xray=false,center=new THREE.Vector3(),radius=1;
 
 /* ---------- 3D ---------- */
 function init(){
@@ -153,7 +138,7 @@ function build(list,label){
   bb.getCenter(center); radius=Math.max(bb.getSize(new THREE.Vector3()).length()/2,.1);
   $('ex').value=0; xray=false; $('bX').classList.remove('on');
   $('title').textContent=label+' — formatek: '+boards.length;
-  $('drop').style.display='none';
+  $('msg').style.display='none';
   makeAnnotations(list.cabs&&list.cabs.length?list.cabs:[{name:label}]);
   setView('iso'); buildList(); refresh();
 }
@@ -309,22 +294,20 @@ function buildList(){
 }
 
 /* ---------- parser .s3d ---------- */
-const hex=u=>[...u].map(b=>b.toString(16).padStart(2,'0')).join(' ');
 function decode(u){
   try{return new TextDecoder('utf-8',{fatal:true}).decode(u)}catch(e){return new TextDecoder('windows-1250').decode(u)}
 }
-async function unpack(u8,info){
+async function unpack(u8){
   let data=u8;
   for(let n=0;n<5;n++){
     if(data[0]===0x50&&data[1]===0x4B){
       const z=await JSZip.loadAsync(data);
       const names=Object.keys(z.files).filter(k=>!z.files[k].dir);
-      info.push('ZIP, pliki: '+names.join(', '));
-      let pick=names.find(k=>/\.(s3d|xml)$/i.test(k))||names[0];
+      const pick=names.find(k=>/\.(s3d|xml)$/i.test(k))||names[0];
       data=await z.files[pick].async('uint8array');
-    }else if(data[0]===0x1f&&data[1]===0x8b){data=pako.ungzip(data);info.push('GZIP rozpakowany')}
+    }else if(data[0]===0x1f&&data[1]===0x8b){data=pako.ungzip(data)}
     else if(data[0]===0x78&&[1,0x5e,0x9c,0xda].includes(data[1])){
-      try{data=pako.inflate(data);info.push('zlib rozpakowany')}catch(e){break}
+      try{data=pako.inflate(data)}catch(e){break}
     }else break;
   }
   return data;
@@ -336,7 +319,7 @@ function attrs(s){
   return o;
 }
 function parseCorpus(text){
-  const out=[],stack=[];out.cabs=[];let fid=0;window.skippedN=0;
+  const out=[],stack=[];out.cabs=[];let fid=0;
   const elmClose=/<\/ELM\s*>/.test(text);
   const re=/<(\/?)(ELEMENT|ELM|AD)(?=[\s\/>])((?:"[^"]*"|[^>"])*)>/g;let m;
   const rad=Math.PI/180;
@@ -367,68 +350,28 @@ function parseCorpus(text){
       else s=[T,H,D];
       const x=num(a.DXPOS),y=num(a.DYPOS),z=num(a.DZPOS);
       const zmin=zFrontDepth?z-s[2]:z;
-      if(Math.min(...s)<0.5){window.skippedN++;continue}
+      if(Math.min(...s)<0.5)continue;
       out.push({name:(stack.length>1?f.short+': ':'')+(a.DNAME||'Formatka'),parent:f.name,cab:f.cab,path:f.path,fr:!!f.fr,smjer:sm,m:[x,y,zmin],s,M:f.M.toArray()});
     }
   }
   return out;
 }
-function samples(text){
-  const o=[];
-  [['ELM',13],['ELMLIST',2],['ESLIM',2],['ELINKS',2],['MSGR',2],['MSPO',3],['MSVA',2],['MSMA',2],['MAK',2],['SPOJ',2]].forEach(([n,k])=>{
-    const re=new RegExp('<'+n+'(?=[\\s/>])((?:"[^"]*"|[^>"])*)>','g');let m,c=0;
-    while(c<k&&(m=re.exec(text))){c++;const a=attrs(m[1]);
-      const t=Object.entries(a).filter(([q,v])=>v!==''&&v!=='0'&&v!=='false'&&v.length<=40).map(([q,v])=>q+'='+v).join(' ');
-      o.push(n+': '+t.slice(0,420));}
-  });
-  o.push('Zamknięć </ELM>: '+((text.match(/<\/ELM\s*>/g)||[]).length)+'; pominięto mikro-formatek: '+(window.skippedN||0));
-  return o.join('\n');
-}
-function wp(b){const M=new THREE.Matrix4();if(b.M)M.fromArray(b.M);const v=new THREE.Vector3(...b.m).applyMatrix4(M);return [v.x,v.y,v.z]}
-function makeDiag(name,size,sig,steps,text,list){
-  const cnt={};let m;const re=/<([A-Za-z0-9_]+)/g;while((m=re.exec(text)))cnt[m[1]]=(cnt[m[1]]||0)+1;
-  const tags=Object.entries(cnt).sort((a,b)=>b[1]-a[1]).map(e=>e[0]+': '+e[1]).join('\n');
-  let head=text.slice(0,6000).replace(/>([0-9A-Fa-f]{40,})</g,'>[hex '+'…]<').replace(/="([^"]{160})[^"]*"/g,'="$1…"').slice(0,3500);
-  const rows=list.map(b=>b.name+' | '+b.parent+' | SMJER='+b.smjer+' | poz='+wp(b).map(v=>Math.round(v*10)/10).join(',')+' | wym='+b.s.map(v=>Math.round(v*10)/10).join('×')).join('\n');
-  return 'PLIK: '+name+' ('+size+' B)\nSYGNATURA (16 B): '+sig+'\nROZPAKOWANIE: '+(steps.join('; ')||'brak, zwykły tekst')+'\nZNAKÓW TEKSTU: '+text.length+'\n\n=== PRÓBKI TAGÓW ===\n'+samples(text)+'\n\n=== TAGI (liczba wystąpień) ===\n'+tags+'\n\n=== ROZPOZNANE FORMATKI ('+list.length+') ===\n'+rows+'\n\n=== POCZĄTEK TEKSTU ===\n'+head;
-}
 async function loadFile(f){
-  try{
-    const u8=new Uint8Array(await f.arrayBuffer()),steps=[];
-    const data=await unpack(u8,steps),text=decode(data);
-    const list=parseCorpus(text);
-    diagText=makeDiag(f.name,f.size,hex(u8.slice(0,16)),steps,text,list);
-    if(!list.length){alert('Nie znaleziono formatek. Otwieram tryb diagnostyczny, zrób zrzut ekranu.');openDiag();return}
-    build(list,f.name);
-  }catch(err){diagText='BŁĄD: '+err+'\n'+(err.stack||'');openDiag()}
-}
-
-/* ---------- szafka testowa (mm, tył z=0, przód z=510) ---------- */
-function testCabinet(){
-  const P='Szafka_dolna (test)',L=[];
-  const a=(name,m,s)=>L.push({name,parent:P,smjer:-1,m,s});
-  a('Bok_Lewy',[0,100,4],[18,720,506]);
-  a('Bok_Prawy',[582,100,4],[18,720,506]);
-  a('Wieniec_dolny',[18,100,4],[564,18,506]);
-  a('Wieniec_gorny_przod',[18,802,430],[564,18,80]);
-  a('Wieniec_gorny_tyl',[18,802,4],[564,18,80]);
-  a('Polka',[18,450,40],[564,18,466]);
-  a('Plecy',[0,100,0],[600,720,4]);
-  a('Front_lewy',[1.5,103,510],[297,714,18]);
-  a('Front_prawy',[301.5,103,510],[297,714,18]);
-  L.forEach(b=>b.fr=/front/i.test(b.name));
-  L.cabs=[{name:'Szafka_dolna (test)',w:600,h:820,d:510}];
-  return L;
+  const u8=new Uint8Array(await f.arrayBuffer());
+  const data=await unpack(u8),text=decode(data);
+  const list=parseCorpus(text);
+  if(!list.length){$('msg').textContent='Nie znaleziono formatek w pliku.';return}
+  build(list,f.name);
 }
 
 /* ---------- UI ---------- */
-function openDiag(){$('dtxt').textContent=diagText;$('diag').classList.add('open')}
 init();
 const params=new URLSearchParams(location.search);
 const driveId=params.get('id');
 const gasUrl='https://script.google.com/macros/s/AKfycbzY18pXZ-kn3yCLjsI83moxk-uLzvaxaJWwwqrbpNPmqtm02PIwPLxXCYVKEhSa4HLqNQ/exec';
 if(driveId){
   $('title').textContent='Ładowanie pliku...';
+  $('msg').textContent='Ładowanie pliku...';
   fetch(gasUrl+'?id='+encodeURIComponent(driveId),{cache:'force-cache'})
     .then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return r.json()})
     .then(data=>{
@@ -438,13 +381,9 @@ if(driveId){
       for(let i=0;i<bin.length;i++)u8[i]=bin.charCodeAt(i);
       return loadFile(new File([u8],data.name||(driveId+'.s3d')));
     })
-    .catch(err=>{diagText='BŁĄD POBIERANIA: '+err;openDiag()});
+    .catch(err=>{$('title').textContent='Błąd';$('msg').textContent='Błąd pobierania: '+err});
 }
-$('f').onchange=e=>{if(e.target.files[0])loadFile(e.target.files[0]);e.target.value=''};
-$('bTest').onclick=()=>{diagText='Załadowano szafkę testową (dane wbudowane).';build(testCabinet(),'Szafka testowa')};
 $('bList').onclick=()=>$('list').classList.toggle('open');
-$('bDiag').onclick=openDiag;
-$('bCopy').onclick=async()=>{try{await navigator.clipboard.writeText(diagText);$('bCopy').textContent='Skopiowano'}catch(e){const r=document.createRange();r.selectNodeContents($('dtxt'));getSelection().removeAllRanges();getSelection().addRange(r);$('bCopy').textContent='Zaznaczono, naciśnij Ctrl+C'}setTimeout(()=>$('bCopy').textContent='Kopiuj',2500)};$('bClose').onclick=()=>$('diag').classList.remove('open');
 $('home').onclick=()=>boards.length&&flyTo(v3(1,.8,1));
 document.querySelectorAll('[data-lv]').forEach(b=>b.onclick=()=>{selLevel=b.dataset.lv;document.querySelectorAll('[data-lv]').forEach(x=>x.classList.toggle('on',x===b));clearSel();refresh()});
 $('bHide').onclick=()=>{if(sel>=0){selSet.forEach(i=>boards[i].hidden=true);clearSel();refresh()}};
@@ -453,9 +392,6 @@ $('bAll').onclick=()=>{boards.forEach(b=>b.hidden=false);xray=false;$('bX').clas
 $('ex').oninput=refresh;
 $('cLab').onchange=$('cDim').onchange=refresh;
 $('cFr').onchange=()=>{if($('cFr').checked&&sel>=0&&boards[sel].fr)clearSel();refresh()};
-['dragenter','dragover'].forEach(t=>addEventListener(t,e=>{e.preventDefault();document.body.classList.add('drag')}));
-['dragleave','drop'].forEach(t=>addEventListener(t,e=>{e.preventDefault();document.body.classList.remove('drag')}));
-addEventListener('drop',e=>{const f=e.dataTransfer.files[0];if(f)loadFile(f)});
 </script>
 </body>
 </html>
