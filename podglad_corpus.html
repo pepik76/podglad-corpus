@@ -426,7 +426,7 @@ function openDiag(){$('dtxt').textContent=diagText;$('diag').classList.add('open
 init();
 const params=new URLSearchParams(location.search);
 const driveId=params.get('id');
-const gasUrl='TUTAJ_WKLEJ_ADRES_SKRYPTU';
+const gasUrl='https://script.google.com/macros/s/AKfycbzY18pXZ-kn3yCLjsI83moxk-uLzvaxaJWwwqrbpNPmqtm02PIwPLxXCYVKEhSa4HLqNQ/exec';
 if(driveId){
   fetch(gasUrl+'?id='+encodeURIComponent(driveId))
     .then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return r.json()})
