@@ -426,10 +426,17 @@ function openDiag(){$('dtxt').textContent=diagText;$('diag').classList.add('open
 init();
 const params=new URLSearchParams(location.search);
 const driveId=params.get('id');
+const gasUrl='TUTAJ_WKLEJ_ADRES_SKRYPTU';
 if(driveId){
-  fetch('https://drive.google.com/uc?export=download&id='+encodeURIComponent(driveId))
-    .then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return r.arrayBuffer()})
-    .then(buf=>loadFile(new File([buf],(params.get('name')||driveId)+'.s3d')))
+  fetch(gasUrl+'?id='+encodeURIComponent(driveId))
+    .then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return r.json()})
+    .then(data=>{
+      if(data.error)throw new Error(data.error);
+      const bin=atob(data.base64);
+      const u8=new Uint8Array(bin.length);
+      for(let i=0;i<bin.length;i++)u8[i]=bin.charCodeAt(i);
+      return loadFile(new File([u8],data.name||(driveId+'.s3d')));
+    })
     .catch(err=>{diagText='BŁĄD POBIERANIA: '+err;openDiag()});
 }
 $('f').onchange=e=>{if(e.target.files[0])loadFile(e.target.files[0]);e.target.value=''};
