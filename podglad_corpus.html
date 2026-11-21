@@ -424,6 +424,14 @@ function testCabinet(){
 /* ---------- UI ---------- */
 function openDiag(){$('dtxt').textContent=diagText;$('diag').classList.add('open')}
 init();
+const params=new URLSearchParams(location.search);
+const driveId=params.get('id');
+if(driveId){
+  fetch('https://drive.google.com/uc?export=download&id='+encodeURIComponent(driveId))
+    .then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return r.arrayBuffer()})
+    .then(buf=>loadFile(new File([buf],(params.get('name')||driveId)+'.s3d')))
+    .catch(err=>{diagText='BŁĄD POBIERANIA: '+err;openDiag()});
+}
 $('f').onchange=e=>{if(e.target.files[0])loadFile(e.target.files[0]);e.target.value=''};
 $('bTest').onclick=()=>{diagText='Załadowano szafkę testową (dane wbudowane).';build(testCabinet(),'Szafka testowa')};
 $('bList').onclick=()=>$('list').classList.toggle('open');
