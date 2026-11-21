@@ -428,7 +428,8 @@ const params=new URLSearchParams(location.search);
 const driveId=params.get('id');
 const gasUrl='https://script.google.com/macros/s/AKfycbzY18pXZ-kn3yCLjsI83moxk-uLzvaxaJWwwqrbpNPmqtm02PIwPLxXCYVKEhSa4HLqNQ/exec';
 if(driveId){
-  fetch(gasUrl+'?id='+encodeURIComponent(driveId))
+  $('title').textContent='Ładowanie pliku...';
+  fetch(gasUrl+'?id='+encodeURIComponent(driveId),{cache:'force-cache'})
     .then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return r.json()})
     .then(data=>{
       if(data.error)throw new Error(data.error);
