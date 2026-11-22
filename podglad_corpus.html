@@ -194,60 +194,6 @@ function colorFor(b){
   return 0xd6a96a;
 }
 
-// Buduje bryłę w lokalnym układzie płyty:
-// dla sm===1: X wzdłuż konturu u, Y wzdłuż konturu v, Z od zmin do zmin+T
-// dla sm===2: X wzdłuż konturu u, Y od ymin do ymin+T, Z wzdłuż konturu v
-// dla sm===0: X od xmin do xmin+T, Y wzdłuż konturu v, Z wzdłuż konturu u
-function makePolyGeometry(d){
-  const poly=d.poly;
-  if(!poly||poly.length<3)return null;
-  const sm=d.smjer;
-  const [x0,y0,z0]=d.m;
-  const [sx,sy,sz]=d.s;
-  const T=sm===1?sz:sm===2?sy:sx;
-  if(!(T>0))return null;
-
-  function ptToLocal(p){
-    const u=p.x, v=p.y;
-    if(sm===1)return new THREE.Vector3((x0+u)*S,(y0+v)*S,z0*S);
-    if(sm===2)return new THREE.Vector3((x0+u)*S,y0*S,(z0+v)*S);
-    return new THREE.Vector3(x0*S,(y0+v)*S,(z0+u)*S);
-  }
-  function extOffset(){
-    if(sm===1)return new THREE.Vector3(0,0,T*S);
-    if(sm===2)return new THREE.Vector3(0,T*S,0);
-    return new THREE.Vector3(T*S,0,0);
-  }
-
-  const basePts=poly.map(ptToLocal);
-  const off=extOffset();
-  const topPts=basePts.map(p=>p.clone().add(off));
-  const n=basePts.length;
-  const pos=[];
-
-  function pushQuad(a,b,c,dpt){
-    pos.push(a.x,a.y,a.z, b.x,b.y,b.z, c.x,c.y,c.z,
-             a.x,a.y,a.z, c.x,c.y,c.z, dpt.x,dpt.y,dpt.z);
-  }
-  function pushTri(a,b,c){
-    pos.push(a.x,a.y,a.z, b.x,b.y,b.z, c.x,c.y,c.z);
-  }
-
-  for(let i=0;i<n;i++){
-    const j=(i+1)%n;
-    pushQuad(basePts[i],basePts[j],topPts[j],topPts[i]);
-  }
-  for(let i=1;i<n-1;i++){
-    pushTri(basePts[0],basePts[i],basePts[i+1]);
-    pushTri(topPts[0],topPts[i+1],topPts[i]);
-  }
-
-  const geo=new THREE.BufferGeometry();
-  geo.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));
-  geo.computeVertexNormals();
-  return geo;
-}
-
 function build(list,label){
   clearLabs();
   while(group.children.length)group.remove(group.children[0]);
@@ -270,28 +216,17 @@ function build(list,label){
       polygonOffsetUnits:1
     });
 
-    let g=null, m=null, basePos=null;
-    const polyGeo=d.shape!=='cyl'&&d.poly&&d.poly.length>=3?makePolyGeometry(d):null;
-
-    if(polyGeo){
-      g=polyGeo;
-      m=new THREE.Mesh(g,mat);
-      m.applyMatrix4(M);
-      basePos=m.position.clone();
-    }else{
-      g=d.shape==='cyl'
-        ?new THREE.CylinderGeometry(d.s[0]/2*S,d.s[0]/2*S,d.s[1]*S,24)
-        :new THREE.BoxGeometry(d.s[0]*S,d.s[1]*S,d.s[2]*S);
-      m=new THREE.Mesh(g,mat);
-      const c=new THREE.Vector3(d.m[0]+d.s[0]/2,d.m[1]+d.s[1]/2,d.m[2]+d.s[2]/2)
-        .applyMatrix4(M)
-        .multiplyScalar(S);
-      m.position.copy(c);
-      m.quaternion.setFromRotationMatrix(M);
-      basePos=c.clone();
-    }
-
+    const g=d.shape==='cyl'
+      ?new THREE.CylinderGeometry(d.s[0]/2*S,d.s[0]/2*S,d.s[1]*S,24)
+      :new THREE.BoxGeometry(d.s[0]*S,d.s[1]*S,d.s[2]*S);
+    const m=new THREE.Mesh(g,mat);
+    const c=new THREE.Vector3(d.m[0]+d.s[0]/2,d.m[1]+d.s[1]/2,d.m[2]+d.s[2]/2)
+      .applyMatrix4(M)
+      .multiplyScalar(S);
+    m.position.copy(c);
+    m.quaternion.setFromRotationMatrix(M);
     m.userData.i=i;
+
     const e=new THREE.LineSegments(
       new THREE.EdgesGeometry(g,28),
       new THREE.LineBasicMaterial({color:0x10151a})
@@ -302,7 +237,7 @@ function build(list,label){
     boards.push(Object.assign({},d,{
       mesh:m,
       edge:e,
-      base:basePos,
+      base:c.clone(),
       hidden:false,
       col
     }));
@@ -762,70 +697,18 @@ function attrs(s){
   return o;
 }
 
-// Wyciąga zewnętrzny kontur (CURVE=-1) w milimetrach, jeśli różni się od prostokąta [0..VISINA, 0..DUBINA]
-function extractPoly(rawData,vis,dub){
-  if(!rawData)return null;
-  let cur=null,ol=null;
-  for(const m of rawData.matchAll(/"([^"=]+)=([^"]*)"/g)){
-    const a=m[1],b=m[2];
-    if(a==='CURVE'){
-      cur={pts:[],open:false,out:+b<0};
-      if(cur.out)ol=cur;
-      else cur=null;
-      continue;
-    }
-    if(!cur)continue;
-    if(a==='CNOPEN')cur.open=b==='1';
-    else if(a==='PTOCKA')cur.pts.push({});
-    else if(a==='PTX')cur.pts.at(-1).x=+b*1000;
-    else if(a==='PTZ')cur.pts.at(-1).z=+b*1000;
-  }
-  if(!ol||ol.open)return null;
-  let q=ol.pts.filter(p=>!isNaN(p.x)&&!isNaN(p.z)).map(p=>({x:p.x,y:p.z}));
-  q=q.filter((p,i)=>{
-    const n=q[(i+1)%q.length];
-    return!(Math.abs(p.x-n.x)<.05&&Math.abs(p.y-n.y)<.05);
-  });
-  if(q.length<3)return null;
-  const bx=Math.max(...q.map(p=>p.x))-Math.min(...q.map(p=>p.x));
-  const by=Math.max(...q.map(p=>p.y))-Math.min(...q.map(p=>p.y));
-  const ax=q.every((p,i)=>{
-    const n=q[(i+1)%q.length];
-    return Math.abs(p.x-n.x)<.05||Math.abs(p.y-n.y)<.05;
-  });
-  const isRect=q.length===4&&ax&&Math.abs(bx-vis)<.5&&Math.abs(by-dub)<.5;
-  const hasSkew=q.some((p,i)=>{
-    const n=q[(i+1)%q.length];
-    return Math.abs(p.x-n.x)>.2&&Math.abs(p.y-n.y)>.2;
-  });
-  if(isRect&&!hasSkew)return null;
-  return q;
-}
-
 function parseCorpus(text){
   const out=[],stack=[];
   out.cabs=[];
   let fid=0;
   const elmClose=/<\/ELM\s*>/.test(text);
-  const re=/<(\/?)(ELEMENT|ELM|AD|KRIVULJE)(?=[\s\/>])((?:"[^"]*"|[^>"])*)>/g;
+  const re=/<(\/?)(ELEMENT|ELM|AD)(?=[\s\/>])((?:"[^"]*"|[^>"])*)>/g;
   const rad=Math.PI/180;
-  let m, lastAd=null;
+  let m;
 
   while((m=re.exec(text))){
     const close=m[1]==='/', tag=m[2], body=m[3], self=/\/\s*$/.test(body);
-
-    if(tag==='KRIVULJE'){
-      if(!close&&lastAd){
-        const a=attrs(body);
-        if(a.DATA){
-          lastAd.poly=extractPoly(a.DATA,lastAd.rawH,lastAd.rawD);
-        }
-      }
-      continue;
-    }
-
     if(tag==='ELEMENT'||tag==='ELM'){
-      lastAd=null;
       if(tag==='ELM'&&!elmClose)continue;
       if(close){stack.pop();continue}
       const a=attrs(body), par=stack[stack.length-1];
@@ -857,17 +740,16 @@ function parseCorpus(text){
       if(tag==='ELM'&&(a.ETIPE==='16'||/nozka|nóżk/i.test(nm))){
         const r=25,h=num(a.EVISINA,100);
         out.push({
-          name:nm,parent:par?par.name:'',mat:'Nóżka',smjer:-1,shape:'cyl',
-          path:f.path,cab:f.cab,m:[-r,0,-r],s:[2*r,h,2*r],M:M.toArray(),poly:null
+          name:nm,parent:par?par.name:'',mat:'Nóżka',shape:'cyl',
+          path:f.path,cab:f.cab,m:[-r,0,-r],s:[2*r,h,2*r],M:M.toArray()
         });
       }
       if(!self)stack.push(f);
-    }else if(tag==='AD'){
-      if(close){lastAd=null;continue}
+    }else if(tag==='AD'&&!close){
       const a=attrs(body);
-      if(a.VISIBLE==='false'){lastAd=null;continue}
+      if(a.VISIBLE==='false')continue;
       const f=stack[stack.length-1]||{name:'(bez elementu)',short:'',M:new THREE.Matrix4(),cab:0,fr:false,skip:false};
-      if(f.skip){lastAd=null;continue}
+      if(f.skip)continue;
       const T=num(a.DEBLJINA),H=num(a.VISINA),D=num(a.DUBINA),sm=Math.round(num(a.SMJER));
       let s,zFrontDepth=true;
       if(sm===1){s=[D,H,T];zFrontDepth=false}
@@ -875,24 +757,18 @@ function parseCorpus(text){
       else s=[T,H,D];
       const x=num(a.DXPOS),y=num(a.DYPOS),z=num(a.DZPOS);
       const zmin=zFrontDepth?z-s[2]:z;
-      if(Math.min(...s)<0.5){lastAd=null;continue}
-      const item={
+      if(Math.min(...s)<0.5)continue;
+      out.push({
         name:(stack.length>1?f.short+': ':'')+(a.DNAME||'Formatka'),
         parent:f.name,
         mat:a.MATNAME||'',
         cab:f.cab,
         path:f.path,
         fr:!!(f.fr||(a.TIPFRONTE&&a.TIPFRONTE!=='0')),
-        smjer:sm,
-        rawH:H,
-        rawD:D,
         m:[x,y,zmin],
         s,
-        poly:null,
         M:f.M.toArray()
-      };
-      out.push(item);
-      lastAd=!self?item:null;
+      });
     }
   }
   return out;
