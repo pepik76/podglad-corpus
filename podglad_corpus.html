@@ -120,7 +120,7 @@ label.chk input{width:22px;height:22px;accent-color:var(--acc)}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.1.0/pako.min.js"></script>
 <script>
-const SCRIPT_URL=''; /* tu wklej adres wdrożenia skryptu Google (Apps Script), kończy się na /exec */
+const SCRIPT_URL='https://script.google.com/macros/s/AKfycbzY18pXZ-kn3yCLjsI83moxk-uLzvaxaJWwwqrbpNPmqtm02PIwPLxXCYVKEhSa4HLqNQ/exec';
 const S=0.001, $=id=>document.getElementById(id);
 
 let anim=null,cubeRen,cubeScene,cubeCam,cubeZones=[],cubeHover=null;
@@ -204,7 +204,6 @@ function buildPlateGeometry(d){
   const poly=d.poly;
   const cuts=d.cuts||[];
 
-  // Brak własnego konturu i otworów -> zwykły prostopadłościan w lokalnym układzie [0..L, 0..W, 0..T]
   if(!poly&&!cuts.length){
     const g=new THREE.BoxGeometry(L,W,T);
     g.translate(L/2,W/2,T/2);
@@ -227,7 +226,6 @@ function buildPlateGeometry(d){
     sh.closePath();
   }
 
-  // Wycięcia wewnętrzne / otwory
   cuts.forEach(c=>{
     const cx=c.x*S, cy=c.y*S, cw=c.w*S, ch=c.h*S;
     if(cw<=0||ch<=0)return;
@@ -577,7 +575,6 @@ function syncModeUI(){
   $('bList').disabled=ci<0;
   if(ci<0)$('list').classList.remove('open');
 
-  // W edytorze szafki poziom "Szafka" nie jest potrzebny (jesteśmy już wewnątrz szafki)
   document.querySelectorAll('[data-lv="cab"]').forEach(btn=>{
     btn.disabled=isCab;
     if(isCab&&selLevel==='cab'){
@@ -608,7 +605,7 @@ function refresh(){
   });
 
   const k=$('ex').value/100*0.9;
-  const expOrigin=mode==='cabinet'?center:center;
+  const expOrigin=center;
 
   boards.forEach((b,i)=>{
     const inScope=mode==='project'||(b.cab||0)===activeCab;
@@ -836,20 +833,16 @@ function parseCurves(rawData,vis,dub,sm){
   return{cuts,poly};
 }
 
-// Buduje lokalną macierz transformacji płyty [0..s0, 0..s1, 0..s2] w układzie elementu nadrzędnego
 function plateLocalMatrix(a,sm,s){
-  const [L0,W0,T0]=s;
+  const [,,T0]=s;
   const x=num(a.DXPOS), y=num(a.DYPOS), z=num(a.DZPOS);
   const M=new THREE.Matrix4();
   if(sm===1){
-    // Płaszczyzna X-Y, grubość T0 wzdłuż +Z (zaczyna się w DZPOS)
     M.makeTranslation(x,y,z);
   }else if(sm===2){
-    // Płaszczyzna X-Z, grubość T0 wzdłuż +Y (zaczyna się w DYPOS)
     M.makeTranslation(x,y+T0,z);
     M.multiply(new THREE.Matrix4().makeRotationX(-Math.PI/2));
   }else{
-    // sm===0: płaszczyzna Y-Z, grubość T0 wzdłuż +X (zaczyna się w DXPOS)
     M.makeTranslation(x+T0,y,z);
     M.multiply(new THREE.Matrix4().makeRotationY(Math.PI/2));
   }
@@ -917,7 +910,6 @@ function parseCorpus(text){
 
       if(Math.min(...s)<0.5)continue;
 
-      // Jeśli <AD ...> jest samozamykające, szukamy <KRIVULJE> wewnątrz następnych tagów przed zamknięciem/kolejnym <AD>/<ELEMENT>
       let curveRaw='';
       if(self){
         const rest=text.slice(re.lastIndex,re.lastIndex+1200);
