@@ -285,7 +285,7 @@ function pick(e){
   const h=rc.intersectObjects(group.children.filter(o=>o.visible),false)[0];
   if(h)select(h.object.userData.i); else {clearSel();refresh()}
 }
-function isPart(b){return !(b.shape==='cyl'||/uchwyt|nozka|nóżk|stopk|axilo/i.test((b.parent||'')+' '+(b.name||'')))}
+function isPart(b){return !(b.shape==='cyl'||b.add||/uchwyt|nozka|nóżk|stopk|axilo/i.test((b.parent||'')+' '+(b.name||'')))}
 function buildList(){
   const l=$('list');l.innerHTML='';
   const c=sel>=0?(boards[sel].cab||0):-1;listCab=c;
@@ -373,7 +373,7 @@ function parseCorpus(text){
       const zmin=zFrontDepth?z-s[2]:z;
       if(Math.min(...s)<0.5)continue;
       const mat=a.MATNAME||a.MATUID||f.mat||'';
-      out.push({name:(stack.length>1?f.short+': ':'')+dname,parent:f.name,cab:f.cab,path:f.path,fr:!!f.fr,smjer:sm,mat,m:[x,y,zmin],s,M:f.M.toArray()});
+      out.push({name:(stack.length>1?f.short+': ':'')+dname,parent:f.name,cab:f.cab,path:f.path,fr:!!f.fr,add:a.TIPDASKE==='14',smjer:sm,mat,m:[x,y,zmin],s,M:f.M.toArray()});
     }
   }
   return out;
