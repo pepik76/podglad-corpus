@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover">
-<title>Podgląd Corpus .s3d</title>
+<title>Podgląd Corpus</title>
 <style>
 :root{--bg:#eef1f4;--ink:#10151a;--panel:#fff;--line:#10151a;--acc:#0a5cff;--hi:#ffc400}
 *{box-sizing:border-box}
@@ -35,8 +35,10 @@ button:active,.btn:active{background:var(--hi)}
 #list{position:absolute;top:0;bottom:0;left:0;width:min(340px,88%);background:var(--panel);border-right:3px solid var(--line);overflow:auto;transform:translateX(-102%);transition:transform .2s;z-index:5}
 #list.open{transform:none}
 #list h4{margin:0;padding:10px 12px;background:var(--ink);color:#fff;font-size:15px;position:sticky;top:0}
-#list button{width:100%;justify-content:flex-start;border-radius:0;border-width:0 0 1px;min-height:46px;font-weight:600;font-size:15px;text-align:left;white-space:normal}
+#list button{width:100%;justify-content:flex-start;border-radius:0;border-width:0 0 1px;min-height:46px;font-weight:600;font-size:15px;text-align:left;white-space:normal;padding:6px 10px}
+#list button .mat{display:block;font-size:12px;font-weight:700;color:#4a5560;margin-top:2px}
 #list button.sel{background:var(--hi)}
+#list button.sel .mat{color:#10151a}
 #list button.hid{opacity:.4;text-decoration:line-through}
 body.drag #stage{outline:6px dashed var(--acc);outline-offset:-6px}
 [hidden]{display:none!important}
@@ -84,7 +86,7 @@ label.chk input{width:24px;height:24px;accent-color:var(--acc)}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.1.0/pako.min.js"></script>
 <script>
-const SCRIPT_URL=''; /* tu wklej adres wdrożenia skryptu Google (Apps Script), kończy się na /exec */
+const SCRIPT_URL='https://script.google.com/macros/s/AKfycbzY18pXZ-kn3yCLjsI83moxk-uLzvaxaJWwwqrbpNPmqtm02PIwPLxXCYVKEhSa4HLqNQ/exec';
 const S=0.001, $=id=>document.getElementById(id);
 let anim=null,cubeRen,cubeScene,cubeCam,cubeZones=[],cubeHover=null;
 let labEls=[],dimGroup=null,dimGroups=[],curG=null,curCi=0;
@@ -264,8 +266,8 @@ function refresh(){
   } else if(sel>=0){
     const b=boards[sel],a=[...b.s].sort((x,y)=>y-x).map(v=>Math.round(v*10)/10);
     info.style.display='block';
-    info.innerHTML='<b></b><br>Wymiary: '+a[0]+' × '+a[1]+' × '+a[2]+' mm<br>Element nadrzędny: <span></span>';
-    info.querySelector('b').textContent=b.name; info.querySelector('span').textContent=b.parent;
+    info.innerHTML='<b></b><br>Wymiary: '+a[0]+' × '+a[1]+' × '+a[2]+' mm<br>Materiał: <span class="m"></span><br>Element nadrzędny: <span class="p"></span>';
+    info.querySelector('b').textContent=b.name;info.querySelector('.m').textContent=b.mat||'brak';info.querySelector('.p').textContent=b.parent;
   } else info.style.display='none';
 }
 function clearSel(){sel=-1;selSet=new Set()}
@@ -298,7 +300,9 @@ function buildList(){
     groups[g].forEach(i=>{
       const b=boards[i],el=document.createElement('button');el.dataset.i=i;
       const a=[...b.s].sort((x,y)=>y-x).map(v=>Math.round(v));
-      el.textContent=b.name+'  ('+a.join('×')+')';
+      const t1=document.createElement('span');t1.textContent=b.name+'  ('+a.join('×')+')';
+      const t2=document.createElement('span');t2.className='mat';t2.textContent='Materiał: '+(b.mat||'brak');
+      el.appendChild(t1);el.appendChild(t2);
       el.onclick=()=>{sel=i;selSet=new Set([i]);refresh();if(innerWidth<700)l.classList.remove('open')};
       l.appendChild(el);
     });
@@ -329,6 +333,7 @@ function attrs(s){
   while((m=re.exec(s)))o[m[1]]=m[2].replace(/&quot;/g,'"').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&amp;/g,'&');
   return o;
 }
+function isWall(str){return /^sciana$/i.test(String(str||'').trim())}
 function parseCorpus(text){
   const out=[],stack=[];out.cabs=[];let fid=0;
   const elmClose=/<\/ELM\s*>/.test(text);
@@ -340,20 +345,25 @@ function parseCorpus(text){
       if(tag==='ELM'&&!elmClose)continue;
       if(close){stack.pop();continue}
       const a=attrs(body),par=stack[stack.length-1];
+      const visEl=a.EVISIBLE!=='false';
       const pk=q=>{for(const k in a)if(q.test(k))return num(a[k]);return 0};
       const T=new THREE.Matrix4().makeTranslation(pk(/^E?X(POS|POX)$/),pk(/^E?YPOS$/),pk(/^E?ZPOS$/));
       const R=new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(num(a.EXKUT)*rad,num(a.EKUT)*rad,num(a.EZKUT)*rad,'YXZ'));
       const M=(par?par.M.clone():new THREE.Matrix4()).multiply(T).multiply(R);
       const nm=a.ENAME||a.NAME||a.ELNAME||(tag==='ELM'?'ELM':'Element');
-      if(!par)out.cabs.push({name:nm,w:a.ESIRINA,h:a.EVISINA,d:a.EDUBINA});
-      const f={name:(par?par.name+' / ':'')+nm,short:nm,M,path:[...(par?par.path:[]),++fid],cab:par?par.cab:out.cabs.length-1,fr:!!((par&&par.fr)||/fronta/i.test(a.ECLAS||'')||a.ETIPE==='7')};
-      if(tag==='ELM'&&(a.ETIPE==='16'||/nozka/i.test(nm))){
+      const wallEl=isWall(nm)||(par&&par.wall);
+      if(!par&&!wallEl)out.cabs.push({name:nm,w:a.ESIRINA,h:a.EVISINA,d:a.EDUBINA});
+      const isLeg=visEl&&(par?par.vis:true)&&!wallEl&&tag==='ELM'&&(a.ETIPE==='16'||/nozka/i.test(nm));
+      const f={name:(par?par.name+' / ':'')+nm,short:nm,M,path:[...(par?par.path:[]),++fid],cab:par?par.cab:out.cabs.length-1,fr:!!((par&&par.fr)||/fronta/i.test(a.ECLAS||'')||a.ETIPE==='7'),vis:visEl&&(par?par.vis:true),inLeg:isLeg||(par?par.inLeg:false),wall:wallEl,mat:a.MATNAME||a.MATUID||''};
+      if(isLeg){
         const r=25,h=num(a.EVISINA,100);
-        out.push({name:nm,parent:par?par.name:'',smjer:-1,shape:'cyl',path:f.path,cab:f.cab,m:[-r,0,-r],s:[2*r,h,2*r],M:M.toArray()});
+        out.push({name:nm,parent:par?par.name:'',smjer:-1,shape:'cyl',path:f.path,cab:f.cab,mat:f.mat,m:[-r,0,-r],s:[2*r,h,2*r],M:M.toArray()});
       }
       if(!self)stack.push(f);
     }else if(!close){
-      const a=attrs(body),f=stack[stack.length-1]||{name:'(bez elementu)',short:'',M:new THREE.Matrix4(),cab:0};
+      const a=attrs(body),f=stack[stack.length-1]||{name:'(bez elementu)',short:'',M:new THREE.Matrix4(),cab:0,vis:true,inLeg:false,wall:false,mat:''};
+      const dname=a.DNAME||'Formatka';
+      if(f.wall||isWall(dname)||!f.vis||f.inLeg||a.VISIBLE==='false')continue;
       const T=num(a.DEBLJINA),H=num(a.VISINA),D=num(a.DUBINA),sm=Math.round(num(a.SMJER));
       let s,zFrontDepth=true;
       if(sm===1){s=[D,H,T];zFrontDepth=false}
@@ -362,7 +372,8 @@ function parseCorpus(text){
       const x=num(a.DXPOS),y=num(a.DYPOS),z=num(a.DZPOS);
       const zmin=zFrontDepth?z-s[2]:z;
       if(Math.min(...s)<0.5)continue;
-      out.push({name:(stack.length>1?f.short+': ':'')+(a.DNAME||'Formatka'),parent:f.name,cab:f.cab,path:f.path,fr:!!f.fr,smjer:sm,m:[x,y,zmin],s,M:f.M.toArray()});
+      const mat=a.MATNAME||a.MATUID||f.mat||'';
+      out.push({name:(stack.length>1?f.short+': ':'')+dname,parent:f.name,cab:f.cab,path:f.path,fr:!!f.fr,smjer:sm,mat,m:[x,y,zmin],s,M:f.M.toArray()});
     }
   }
   return out;
@@ -389,7 +400,7 @@ async function loadById(id){
   showLoader('Ładowanie pliku…','Pobieranie z Dysku Google');
   try{
     const ac=new AbortController(),to=setTimeout(()=>ac.abort(),90000);
-    const r=await fetch(SCRIPT_URL+'?id='+encodeURIComponent(id),{signal:ac.signal});clearTimeout(to);
+    const r=await fetch(SCRIPT_URL+'?id='+encodeURIComponent(id)+'&t='+Date.now(),{signal:ac.signal,cache:'no-store'});clearTimeout(to);
     if(!r.ok)throw new Error('serwer odpowiedział '+r.status);
     const j=await r.json();if(j.error)throw new Error(j.error);
     const bin=atob(j.base64),u8=new Uint8Array(bin.length);
