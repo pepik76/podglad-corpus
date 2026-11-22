@@ -194,62 +194,56 @@ function colorFor(b){
   return 0xd6a96a;
 }
 
-function makeSkewGeometry(d){
-  const [sx,sy,sz]=d.s;
+// Buduje bryłę w lokalnym układzie płyty:
+// dla sm===1: X wzdłuż konturu u, Y wzdłuż konturu v, Z od zmin do zmin+T
+// dla sm===2: X wzdłuż konturu u, Y od ymin do ymin+T, Z wzdłuż konturu v
+// dla sm===0: X od xmin do xmin+T, Y wzdłuż konturu v, Z wzdłuż konturu u
+function makePolyGeometry(d){
   const poly=d.poly;
   if(!poly||poly.length<3)return null;
-
   const sm=d.smjer;
-  const H=d.rawH||sy, D=d.rawD||sz;
-  const sw=H<D;
+  const [x0,y0,z0]=d.m;
+  const [sx,sy,sz]=d.s;
+  const T=sm===1?sz:sm===2?sy:sx;
+  if(!(T>0))return null;
 
-  // Mapowanie punktów konturu (x, y) na lokalny układ płyty [0..sx, 0..sy, 0..sz]
-  function toLocal(pt){
-    const u=pt.x, v=pt.y;
-    const a=sw?v:u;
-    const b=sw?u:v;
-    if(sm===1)return new THREE.Vector3(a*S,b*S,0);
-    if(sm===2)return new THREE.Vector3(a*S,0,(D-b)*S);
-    return new THREE.Vector3(0,b*S,(D-a)*S);
+  function ptToLocal(p){
+    const u=p.x, v=p.y;
+    if(sm===1)return new THREE.Vector3((x0+u)*S,(y0+v)*S,z0*S);
+    if(sm===2)return new THREE.Vector3((x0+u)*S,y0*S,(z0+v)*S);
+    return new THREE.Vector3(x0*S,(y0+v)*S,(z0+u)*S);
+  }
+  function extOffset(){
+    if(sm===1)return new THREE.Vector3(0,0,T*S);
+    if(sm===2)return new THREE.Vector3(0,T*S,0);
+    return new THREE.Vector3(T*S,0,0);
   }
 
-  function extrudeAxis(){
-    if(sm===1)return new THREE.Vector3(0,0,sz*S);
-    if(sm===2)return new THREE.Vector3(0,sy*S,0);
-    return new THREE.Vector3(sx*S,0,0);
-  }
-
-  const basePts=poly.map(toLocal);
-  const extVec=extrudeAxis();
-  const topPts=basePts.map(p=>p.clone().add(extVec));
+  const basePts=poly.map(ptToLocal);
+  const off=extOffset();
+  const topPts=basePts.map(p=>p.clone().add(off));
   const n=basePts.length;
-  const positions=[];
+  const pos=[];
 
-  function pushQuad(p0,p1,p2,p3){
-    positions.push(
-      p0.x,p0.y,p0.z, p1.x,p1.y,p1.z, p2.x,p2.y,p2.z,
-      p0.x,p0.y,p0.z, p2.x,p2.y,p2.z, p3.x,p3.y,p3.z
-    );
+  function pushQuad(a,b,c,dpt){
+    pos.push(a.x,a.y,a.z, b.x,b.y,b.z, c.x,c.y,c.z,
+             a.x,a.y,a.z, c.x,c.y,c.z, dpt.x,dpt.y,dpt.z);
   }
   function pushTri(a,b,c){
-    positions.push(a.x,a.y,a.z, b.x,b.y,b.z, c.x,c.y,c.z);
+    pos.push(a.x,a.y,a.z, b.x,b.y,b.z, c.x,c.y,c.z);
   }
 
-  // Ściany boczne po obrysie wielokąta (w tym po skosie)
   for(let i=0;i<n;i++){
     const j=(i+1)%n;
     pushQuad(basePts[i],basePts[j],topPts[j],topPts[i]);
   }
-
-  // Wachlarz trójkątów dla podstawy i góry
-  const anchorB=basePts[0], anchorT=topPts[0];
   for(let i=1;i<n-1;i++){
-    pushTri(anchorB,basePts[i+1],basePts[i]);
-    pushTri(anchorT,topPts[i],topPts[i+1]);
+    pushTri(basePts[0],basePts[i],basePts[i+1]);
+    pushTri(topPts[0],topPts[i+1],topPts[i]);
   }
 
   const geo=new THREE.BufferGeometry();
-  geo.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));
+  geo.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));
   geo.computeVertexNormals();
   return geo;
 }
@@ -264,16 +258,6 @@ function build(list,label){
   listCab=-2;
 
   list.forEach((d,i)=>{
-    let g=null;
-    if(d.shape==='cyl'){
-      g=new THREE.CylinderGeometry(d.s[0]/2*S,d.s[0]/2*S,d.s[1]*S,24);
-    }else if(d.poly&&d.poly.length>=3){
-      g=makeSkewGeometry(d);
-    }
-    if(!g){
-      g=new THREE.BoxGeometry(d.s[0]*S,d.s[1]*S,d.s[2]*S);
-    }
-
     const M=new THREE.Matrix4();
     if(d.M)M.fromArray(d.M);
 
@@ -286,16 +270,30 @@ function build(list,label){
       polygonOffsetUnits:1
     });
 
-    const m=new THREE.Mesh(g,mat);
-    const c=new THREE.Vector3(d.m[0]+d.s[0]/2,d.m[1]+d.s[1]/2,d.m[2]+d.s[2]/2)
-      .applyMatrix4(M)
-      .multiplyScalar(S);
-    m.position.copy(c);
-    m.quaternion.setFromRotationMatrix(M);
-    m.userData.i=i;
+    let g=null, m=null, basePos=null;
+    const polyGeo=d.shape!=='cyl'&&d.poly&&d.poly.length>=3?makePolyGeometry(d):null;
 
+    if(polyGeo){
+      g=polyGeo;
+      m=new THREE.Mesh(g,mat);
+      m.applyMatrix4(M);
+      basePos=m.position.clone();
+    }else{
+      g=d.shape==='cyl'
+        ?new THREE.CylinderGeometry(d.s[0]/2*S,d.s[0]/2*S,d.s[1]*S,24)
+        :new THREE.BoxGeometry(d.s[0]*S,d.s[1]*S,d.s[2]*S);
+      m=new THREE.Mesh(g,mat);
+      const c=new THREE.Vector3(d.m[0]+d.s[0]/2,d.m[1]+d.s[1]/2,d.m[2]+d.s[2]/2)
+        .applyMatrix4(M)
+        .multiplyScalar(S);
+      m.position.copy(c);
+      m.quaternion.setFromRotationMatrix(M);
+      basePos=c.clone();
+    }
+
+    m.userData.i=i;
     const e=new THREE.LineSegments(
-      new THREE.EdgesGeometry(g,25),
+      new THREE.EdgesGeometry(g,28),
       new THREE.LineBasicMaterial({color:0x10151a})
     );
     m.add(e);
@@ -304,7 +302,7 @@ function build(list,label){
     boards.push(Object.assign({},d,{
       mesh:m,
       edge:e,
-      base:c.clone(),
+      base:basePos,
       hidden:false,
       col
     }));
@@ -650,9 +648,8 @@ function refresh(){
   }else if(sel>=0){
     const b=boards[sel];
     const a=[...b.s].sort((x,y)=>y-x).map(v=>Math.round(v*10)/10);
-    const skewNote=b.poly?' · kształt z krzywych':'';
     info.style.display='block';
-    info.innerHTML='<b></b><br>Wymiary: '+a[0]+' × '+a[1]+' × '+a[2]+' mm'+skewNote+'<div class="sub">Materiał: <span></span></div><div class="sub">Element nadrzędny: <span></span></div>';
+    info.innerHTML='<b></b><br>Wymiary: '+a[0]+' × '+a[1]+' × '+a[2]+' mm<div class="sub">Materiał: <span></span></div><div class="sub">Element nadrzędny: <span></span></div>';
     info.querySelector('b').textContent=b.name;
     const subs=info.querySelectorAll('span');
     subs[0].textContent=b.mat||'brak';
@@ -765,7 +762,8 @@ function attrs(s){
   return o;
 }
 
-function parsePoly(rawData,vis,dub){
+// Wyciąga zewnętrzny kontur (CURVE=-1) w milimetrach, jeśli różni się od prostokąta [0..VISINA, 0..DUBINA]
+function extractPoly(rawData,vis,dub){
   if(!rawData)return null;
   let cur=null,ol=null;
   for(const m of rawData.matchAll(/"([^"=]+)=([^"]*)"/g)){
@@ -783,8 +781,7 @@ function parsePoly(rawData,vis,dub){
     else if(a==='PTZ')cur.pts.at(-1).z=+b*1000;
   }
   if(!ol||ol.open)return null;
-  const sw=vis<dub, L=Math.max(vis,dub), W=Math.min(vis,dub);
-  let q=ol.pts.filter(p=>!isNaN(p.x)&&!isNaN(p.z)).map(p=>sw?{x:p.z,y:p.x}:{x:p.x,y:p.z});
+  let q=ol.pts.filter(p=>!isNaN(p.x)&&!isNaN(p.z)).map(p=>({x:p.x,y:p.z}));
   q=q.filter((p,i)=>{
     const n=q[(i+1)%q.length];
     return!(Math.abs(p.x-n.x)<.05&&Math.abs(p.y-n.y)<.05);
@@ -796,7 +793,7 @@ function parsePoly(rawData,vis,dub){
     const n=q[(i+1)%q.length];
     return Math.abs(p.x-n.x)<.05||Math.abs(p.y-n.y)<.05;
   });
-  const isRect=q.length===4&&ax&&Math.abs(bx-L)<.3&&Math.abs(by-W)<.3;
+  const isRect=q.length===4&&ax&&Math.abs(bx-vis)<.5&&Math.abs(by-dub)<.5;
   const hasSkew=q.some((p,i)=>{
     const n=q[(i+1)%q.length];
     return Math.abs(p.x-n.x)>.2&&Math.abs(p.y-n.y)>.2;
@@ -821,7 +818,7 @@ function parseCorpus(text){
       if(!close&&lastAd){
         const a=attrs(body);
         if(a.DATA){
-          lastAd.poly=parsePoly(a.DATA,lastAd.rawH,lastAd.rawD);
+          lastAd.poly=extractPoly(a.DATA,lastAd.rawH,lastAd.rawD);
         }
       }
       continue;
@@ -861,7 +858,7 @@ function parseCorpus(text){
         const r=25,h=num(a.EVISINA,100);
         out.push({
           name:nm,parent:par?par.name:'',mat:'Nóżka',smjer:-1,shape:'cyl',
-          path:f.path,cab:f.cab,m:[-r,0,-r],s:[2*r,h,2*r],M:M.toArray()
+          path:f.path,cab:f.cab,m:[-r,0,-r],s:[2*r,h,2*r],M:M.toArray(),poly:null
         });
       }
       if(!self)stack.push(f);
