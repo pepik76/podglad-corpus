@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover">
 <title>Podgląd Corpus .s3d</title>
 <style>
-:root{--bg:#eef1f4;--ink:#10151a;--panel:#fff;--line:#10151a;--acc:#0a5cff;--hi:#ffc400;--ok:#16794c}
+:root{--bg:#eef1f4;--ink:#10151a;--panel:#fff;--line:#10151a;--acc:#0a5cff;--hi:#ffc400}
 *{box-sizing:border-box}
 html,body{margin:0;height:100%;font-family:"Segoe UI",Roboto,Arial,sans-serif;color:var(--ink);background:var(--bg);overflow:hidden}
 #app{display:flex;flex-direction:column;height:100%}
@@ -130,7 +130,6 @@ let mode='project', activeCab=-1;
 let sel=-1, selSet=new Set(), selLevel='board', listCab=-2, xray=false;
 let center=new THREE.Vector3(), radius=1, lastTry=null, docName='';
 
-/* ---------- 3D & kamera ---------- */
 function init(){
   const v=$('view');
   scene=new THREE.Scene();
@@ -184,7 +183,6 @@ function resize(){
   cam.updateProjectionMatrix();
 }
 
-/* ---------- budowanie geometrii z konturu i obrotu ---------- */
 function colorFor(b){
   const n=(b.name||'').toLowerCase(),p=(b.parent||'').toLowerCase();
   if(/uchwyt/.test(p+n))return 0x8d98a5;
@@ -194,66 +192,6 @@ function colorFor(b){
   if(/plecy|hdf|back/.test(n))return 0xa7a398;
   if(/p[oó][lł]k|shelf/.test(n))return 0xe3c48b;
   return 0xd6a96a;
-}
-
-function buildPlateGeometry(d){
-  if(d.shape==='cyl'){
-    return new THREE.CylinderGeometry(d.s[0]/2*S,d.s[0]/2*S,d.s[1]*S,24);
-  }
-  const L=d.s[0]*S, W=d.s[1]*S, T=Math.max(d.s[2]*S,0.0005);
-  const poly=d.poly;
-  const cuts=d.cuts||[];
-
-  if(!poly&&!cuts.length){
-    const g=new THREE.BoxGeometry(L,W,T);
-    g.translate(L/2,W/2,T/2);
-    return g;
-  }
-
-  const sh=new THREE.Shape();
-  if(poly&&poly.length>=3){
-    poly.forEach((pt,idx)=>{
-      const x=pt.x*S, y=pt.y*S;
-      if(idx===0)sh.moveTo(x,y);
-      else sh.lineTo(x,y);
-    });
-    sh.closePath();
-  }else{
-    sh.moveTo(0,0);
-    sh.lineTo(L,0);
-    sh.lineTo(L,W);
-    sh.lineTo(0,W);
-    sh.closePath();
-  }
-
-  cuts.forEach(c=>{
-    const cx=c.x*S, cy=c.y*S, cw=c.w*S, ch=c.h*S;
-    if(cw<=0||ch<=0)return;
-    const path=new THREE.Path();
-    if(c.t==='o'){
-      path.absarc(cx,cy,Math.max(cw/2,0.0005),0,Math.PI*2,true);
-    }else{
-      const x0=cx-cw/2, y0=cy-ch/2, x1=cx+cw/2, y1=cy+ch/2;
-      path.moveTo(x0,y0);
-      path.lineTo(x0,y1);
-      path.lineTo(x1,y1);
-      path.lineTo(x1,y0);
-      path.closePath();
-    }
-    sh.holes.push(path);
-  });
-
-  try{
-    return new THREE.ExtrudeGeometry(sh,{
-      depth:T,
-      bevelEnabled:false,
-      curveSegments:16
-    });
-  }catch(_){
-    const g=new THREE.BoxGeometry(L,W,T);
-    g.translate(L/2,W/2,T/2);
-    return g;
-  }
 }
 
 function build(list,label){
@@ -266,7 +204,10 @@ function build(list,label){
   listCab=-2;
 
   list.forEach((d,i)=>{
-    const g=buildPlateGeometry(d);
+    const g=d.shape==='cyl'
+      ?new THREE.CylinderGeometry(d.s[0]/2*S,d.s[0]/2*S,d.s[1]*S,24)
+      :new THREE.BoxGeometry(d.s[0]*S,d.s[1]*S,d.s[2]*S);
+
     const M=new THREE.Matrix4();
     if(d.M)M.fromArray(d.M);
 
@@ -277,22 +218,26 @@ function build(list,label){
       polygonOffsetFactor:1,
       polygonOffsetUnits:1
     });
+
     const m=new THREE.Mesh(g,mat);
-    m.applyMatrix4(M);
+    const c=new THREE.Vector3(d.m[0]+d.s[0]/2,d.m[1]+d.s[1]/2,d.m[2]+d.s[2]/2)
+      .applyMatrix4(M)
+      .multiplyScalar(S);
+    m.position.copy(c);
+    m.quaternion.setFromRotationMatrix(M);
     m.userData.i=i;
 
     const e=new THREE.LineSegments(
-      new THREE.EdgesGeometry(g,28),
+      new THREE.EdgesGeometry(g,30),
       new THREE.LineBasicMaterial({color:0x10151a})
     );
     m.add(e);
     group.add(m);
 
-    const localPos=m.position.clone();
     boards.push(Object.assign({},d,{
       mesh:m,
       edge:e,
-      base:localPos,
+      base:c.clone(),
       hidden:false,
       col
     }));
@@ -342,9 +287,9 @@ function dirForView(n){
 function flyTo(dv){
   dv=dv.clone().normalize();
   if(Math.abs(dv.y)>0.999){dv.z+=0.001;dv.normalize()}
-  const dist=radius/Math.sin(THREE.MathUtils.degToRad(cam.fov/2))*1.1;
-  cam.near=Math.max(dist/200,0.005);
-  cam.far=Math.max(dist*200,200);
+  const dist=radius/Math.sin(THREE.MathUtils.degToRad(cam.fov/2))*1.05;
+  cam.near=Math.max(dist/100,0.01);
+  cam.far=Math.max(dist*100,100);
   cam.updateProjectionMatrix();
   const d0=Math.max(cam.position.distanceTo(ctl.target),0.05);
   const from=cam.position.clone().sub(ctl.target);
@@ -370,7 +315,6 @@ function stepAnim(){
   if(k>=1)anim=null;
 }
 
-/* ---------- kostka orientacji ---------- */
 function initCube(){
   const box=$('cube'),N=112;
   cubeRen=new THREE.WebGLRenderer({antialias:true,alpha:true});
@@ -444,9 +388,9 @@ function renderCube(){
 }
 function setView(n){
   const dv=dirForView(n);
-  const dist=radius/Math.sin(THREE.MathUtils.degToRad(cam.fov/2))*1.1;
-  cam.near=Math.max(dist/200,0.005);
-  cam.far=Math.max(dist*200,200);
+  const dist=radius/Math.sin(THREE.MathUtils.degToRad(cam.fov/2))*1.05;
+  cam.near=Math.max(dist/100,0.01);
+  cam.far=Math.max(dist*100,100);
   cam.updateProjectionMatrix();
   cam.position.copy(center).addScaledVector(dv,dist);
   ctl.target.copy(center);
@@ -454,7 +398,6 @@ function setView(n){
 }
 const v3=(x,y,z)=>new THREE.Vector3(x,y,z);
 
-/* ---------- etykiety wymiarowe ---------- */
 function clearLabs(){
   $('labs').innerHTML='';
   labEls=[];
@@ -526,7 +469,6 @@ function updateLabs(){
   });
 }
 
-/* ---------- dwa tryby: Projekt i Edytor szafki ---------- */
 function currentCabIndex(){
   if(mode==='cabinet')return activeCab;
   return sel>=0?(boards[sel].cab||0):-1;
@@ -591,7 +533,6 @@ function syncModeUI(){
   }
 }
 
-/* ---------- zaznaczanie, lista, odświeżanie ---------- */
 function refresh(){
   const ci=currentCabIndex();
   if(ci!==listCab)buildList();
@@ -605,15 +546,11 @@ function refresh(){
   });
 
   const k=$('ex').value/100*0.9;
-  const expOrigin=center;
-
   boards.forEach((b,i)=>{
     const inScope=mode==='project'||(b.cab||0)===activeCab;
     const vis=inScope&&!b.hidden&&!($('cFr').checked&&b.fr);
     b.mesh.visible=vis;
-
-    const offsetVec=b.base.clone().sub(expOrigin);
-    b.mesh.position.copy(b.base).addScaledVector(offsetVec,k);
+    b.mesh.position.copy(b.base).addScaledVector(b.base.clone().sub(center),k);
 
     const m=b.mesh.material,s=selSet.has(i);
     m.color.setHex(s?0xffc400:b.col);
@@ -646,12 +583,10 @@ function refresh(){
   }else if(sel>=0){
     const b=boards[sel];
     const a=[...b.s].sort((x,y)=>y-x).map(v=>Math.round(v*10)/10);
-    const shapeInfo=b.cuts?.length||b.poly?` · kontur/wycięcia: ${(b.cuts?.length||0)+(b.poly?1:0)}`:'';
     info.style.display='block';
-    info.innerHTML='<b></b><br>Wymiary: '+a[0]+' × '+a[1]+' × '+a[2]+' mm<span class="sub"></span><div class="sub">Element nadrzędny: <span></span></div>';
+    info.innerHTML='<b></b><br>Wymiary: '+a[0]+' × '+a[1]+' × '+a[2]+' mm<div class="sub">Element nadrzędny: <span></span></div>';
     info.querySelector('b').textContent=b.name;
-    info.querySelectorAll('.sub')[0].textContent='Materiał: '+(b.mat||'—')+shapeInfo;
-    info.querySelectorAll('.sub')[1].textContent=b.parent;
+    info.querySelector('span').textContent=b.parent;
   }else{
     info.style.display='none';
   }
@@ -726,7 +661,6 @@ function buildList(){
   });
 }
 
-/* ---------- parser .s3d z krzywymi (KRIVULJE), obrotami i orientacją ---------- */
 const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 function decode(u){
   try{return new TextDecoder('utf-8',{fatal:true}).decode(u)}
@@ -760,112 +694,18 @@ function attrs(s){
   }
   return o;
 }
-const rr=v=>Math.round(v*10)/10;
-
-function parseCurves(rawData,vis,dub,sm){
-  const none={cuts:[],poly:null};
-  if(!rawData)return none;
-  let cur=null,out=[],ol=null;
-  for(const m of rawData.matchAll(/"([^"=]+)=([^"]*)"/g)){
-    const a=m[1],b=m[2];
-    if(a==='CURVE'){
-      cur={pts:[],arc:false,open:false,out:+b<0};
-      if(cur.out)ol=cur;
-      else out.push(cur);
-      continue;
-    }
-    if(!cur)continue;
-    if(a==='CNOPEN')cur.open=b==='1';
-    else if(a==='PTOCKA')cur.pts.push({});
-    else if(a==='PTX')cur.pts.at(-1).x=+b*1000;
-    else if(a==='PTZ')cur.pts.at(-1).z=+b*1000;
-    else if(a==='PTSTYLE')cur.pts.at(-1).st=+b;
-    else if(a==='PTARRA'){cur.arc=true;cur.pts.at(-1).ra=+b*1000}
-  }
-
-  const sw=vis<dub, L=Math.max(vis,dub), W=Math.min(vis,dub);
-  const mp=q=>sw?{x:rr(q.z),y:rr(q.x),st:q.st,ra:q.ra}:{x:rr(q.x),y:rr(q.z),st:q.st,ra:q.ra};
-  const cuts=[];
-
-  for(const c of out){
-    if(c.open)continue;
-    const xs=c.pts.map(q=>q.x),zs=c.pts.map(q=>q.z);
-    if(xs.length<3||xs.some(isNaN)||zs.some(isNaN))continue;
-    const x0=Math.min(...xs),x1=Math.max(...xs),z0=Math.min(...zs),z1=Math.max(...zs);
-    const w=x1-x0,h=z1-z0;
-    if(w<1||h<1)continue;
-    if(Math.abs(w-L)<1.5&&Math.abs(h-W)<1.5)continue;
-    const cx=(x0+x1)/2,cz=(z0+z1)/2;
-    const o=sw?{x:cz,y:cx,w:h,h:w}:{x:cx,y:cz,w,h};
-    o.t=c.arc&&Math.abs(w-h)<.5?'o':c.arc?'k':'p';
-    for(const q of['x','y','w','h'])o[q]=rr(o[q]);
-    cuts.push(o);
-  }
-
-  let poly=null;
-  if(ol){
-    let q=ol.pts.filter(p=>!isNaN(p.x)&&!isNaN(p.z)).map(mp);
-    q=q.filter((p,i)=>{
-      const n=q[(i+1)%q.length];
-      return!(Math.abs(p.x-n.x)<.05&&Math.abs(p.y-n.y)<.05);
-    });
-    let ch=true;
-    while(ch&&q.length>3){
-      ch=false;
-      for(let i=0;i<q.length;i++){
-        const a=q[(i+q.length-1)%q.length],b=q[i],c=q[(i+1)%q.length];
-        if(!(b.st===2||a.st===2)&&Math.abs((b.x-a.x)*(c.y-b.y)-(b.y-a.y)*(c.x-b.x))<.6){
-          q.splice(i,1);ch=true;break;
-        }
-      }
-    }
-    if(q.length>=3){
-      const bx=Math.max(...q.map(p=>p.x))-Math.min(...q.map(p=>p.x));
-      const by=Math.max(...q.map(p=>p.y))-Math.min(...q.map(p=>p.y));
-      const ax=q.every((p,i)=>{
-        const n=q[(i+1)%q.length];
-        return Math.abs(p.x-n.x)<.05||Math.abs(p.y-n.y)<.05;
-      });
-      const isFullRect=q.length===4&&ax&&Math.abs(bx-L)<.3&&Math.abs(by-W)<.3;
-      if(!isFullRect)poly=q;
-    }
-  }
-  return{cuts,poly};
-}
-
-function plateLocalMatrix(a,sm,s){
-  const [,,T0]=s;
-  const x=num(a.DXPOS), y=num(a.DYPOS), z=num(a.DZPOS);
-  const M=new THREE.Matrix4();
-  if(sm===1){
-    M.makeTranslation(x,y,z);
-  }else if(sm===2){
-    M.makeTranslation(x,y+T0,z);
-    M.multiply(new THREE.Matrix4().makeRotationX(-Math.PI/2));
-  }else{
-    M.makeTranslation(x+T0,y,z);
-    M.multiply(new THREE.Matrix4().makeRotationY(Math.PI/2));
-  }
-  return M;
-}
-
-function extractCurveAttr(tagStr){
-  const m=tagStr.match(/<KRIVULJE\b[^>]*\bDATA="([^"]*)"/);
-  return m?m[1].replace(/&quot;/g,'"').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&amp;/g,'&'):'';
-}
 
 function parseCorpus(text){
   const out=[],stack=[];
   out.cabs=[];
   let fid=0;
   const elmClose=/<\/ELM\s*>/.test(text);
-  const re=/<(\/?)(ELEMENT|ELM|AD)(?=[\s\/>])((?:"[^"]*"|[^>"])*)(?:\/>|>)/g;
+  const re=/<(\/?)(ELEMENT|ELM|AD)(?=[\s\/>])((?:"[^"]*"|[^>"])*)>/g;
   const rad=Math.PI/180;
   let m;
 
   while((m=re.exec(text))){
-    const full=m[0], close=m[1]==='/', tag=m[2], body=m[3], self=/\/\s*$/.test(full);
-
+    const close=m[1]==='/', tag=m[2], body=m[3], self=/\/\s*$/.test(body);
     if(tag==='ELEMENT'||tag==='ELM'){
       if(tag==='ELM'&&!elmClose)continue;
       if(close){stack.pop();continue}
@@ -888,63 +728,32 @@ function parseCorpus(text){
       };
       if(tag==='ELM'&&(a.ETIPE==='16'||/nozka/i.test(nm))){
         const r=25,h=num(a.EVISINA,100);
-        const legM=M.clone().multiply(new THREE.Matrix4().makeTranslation(0,h/2,0));
         out.push({
-          name:nm,parent:par?par.name:'',mat:'Nóżka',smjer:-1,shape:'cyl',
-          path:f.path,cab:f.cab,fr:false,s:[2*r,h,2*r],M:legM.toArray(),cuts:[],poly:null
+          name:nm,parent:par?par.name:'',smjer:-1,shape:'cyl',
+          path:f.path,cab:f.cab,m:[-r,0,-r],s:[2*r,h,2*r],M:M.toArray()
         });
       }
       if(!self)stack.push(f);
-
     }else if(!close){
-      const a=attrs(body);
-      if(a.VISIBLE==='false')continue;
-      const f=stack[stack.length-1]||{name:'(bez elementu)',short:'',M:new THREE.Matrix4(),cab:0,fr:false};
+      const a=attrs(body), f=stack[stack.length-1]||{name:'(bez elementu)',short:'',M:new THREE.Matrix4(),cab:0};
       const T=num(a.DEBLJINA),H=num(a.VISINA),D=num(a.DUBINA),sm=Math.round(num(a.SMJER));
-      if(!(T>0))continue;
-
-      let s;
-      if(sm===1)s=[D,H,T];
-      else if(sm===2)s=[H,T,D];
+      let s,zFrontDepth=true;
+      if(sm===1){s=[D,H,T];zFrontDepth=false}
+      else if(sm===2){s=[H,T,D]}
       else s=[T,H,D];
-
+      const x=num(a.DXPOS),y=num(a.DYPOS),z=num(a.DZPOS);
+      const zmin=zFrontDepth?z-s[2]:z;
       if(Math.min(...s)<0.5)continue;
-
-      let curveRaw='';
-      if(self){
-        const rest=text.slice(re.lastIndex,re.lastIndex+1200);
-        const nextStop=rest.search(/<(?:AD|ELEMENT|ELM|\/ELEMENT|\/ELM)\b/);
-        curveRaw=extractCurveAttr(nextStop>=0?rest.slice(0,nextStop):rest);
-      }else{
-        const endAd=text.indexOf('</AD>',re.lastIndex);
-        if(endAd>re.lastIndex){
-          curveRaw=extractCurveAttr(text.slice(re.lastIndex,endAd));
-        }
-      }
-
-      const {cuts,poly}=parseCurves(curveRaw,H,D,sm);
-      const plateM=f.M.clone().multiply(plateLocalMatrix(a,sm,s));
-      const isFront=!!(f.fr||(a.TIPFRONTE&&a.TIPFRONTE!=='0'));
-
       out.push({
         name:(stack.length>1?f.short+': ':'')+(a.DNAME||'Formatka'),
-        parent:f.name,
-        mat:a.MATNAME||'',
-        cab:f.cab,
-        path:f.path,
-        fr:isFront,
-        smjer:sm,
-        s,
-        M:plateM.toArray(),
-        cuts,
-        poly
+        parent:f.name,cab:f.cab,path:f.path,fr:!!f.fr,smjer:sm,
+        m:[x,y,zmin],s,M:f.M.toArray()
       });
     }
   }
   return out;
 }
 
-/* ---------- ładowanie wyłącznie przez skrypt Google ---------- */
 const paint=()=>new Promise(r=>setTimeout(r,40));
 function showLoader(txt,sub){
   const l=$('loader');
@@ -1010,7 +819,6 @@ async function loadById(id){
   }
 }
 
-/* ---------- zdarzenia interfejsu ---------- */
 init();
 
 $('bList').onclick=()=>$('list').classList.toggle('open');
