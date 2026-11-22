@@ -688,153 +688,90 @@ function num(v,d=0){
   const x=parseFloat(String(v).replace(',','.'));
   return isNaN(x)?d:x;
 }
-
-function directChildren(el,tag){
-  return [...el.children].filter(c=>c.tagName===tag);
-}
-function childContainerItems(el,containerTag,itemTag){
-  const box=directChildren(el,containerTag)[0];
-  return box?directChildren(box,itemTag):[];
-}
-function attrNum(el,re,def=0){
-  if(!el||!el.attributes)return def;
-  for(const at of el.attributes){
-    if(re.test(at.name))return num(at.value,def);
+function attrs(s){
+  const o={},re=/([A-Za-z0-9_]+)="([^"]*)"/g;
+  let m;
+  while((m=re.exec(s))){
+    o[m[1]]=m[2].replace(/&quot;/g,'"').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&amp;/g,'&');
   }
-  return def;
+  return o;
 }
 
 function parseCorpus(text){
-  const clean=text.replace(/^\uFEFF/,'').replace(/^\s*<!--[\s\S]*?-->/,'');
-  const doc=new DOMParser().parseFromString(clean,'application/xml');
-  if(doc.querySelector('parsererror')){
-    throw new Error('Nieprawidłowa struktura XML pliku .s3d');
-  }
-
-  const out=[];
+  const out=[],stack=[];
   out.cabs=[];
   let fid=0;
+  const elmClose=/<\/ELM\s*>/.test(text);
+  const re=/<(\/?)(ELEMENT|ELM|AD)(?=[\s\/>])((?:"[^"]*"|[^>"])*)>/g;
   const rad=Math.PI/180;
+  let m;
 
-  function buildElementMatrix(el,parentM){
-    const tx=attrNum(el,/^E?X(POS|POX)$/i,0);
-    const ty=attrNum(el,/^E?YPOS$/i,0);
-    const tz=attrNum(el,/^E?ZPOS$/i,0);
-    const rx=num(el.getAttribute('EXKUT'))*rad;
-    const ry=num(el.getAttribute('EKUT'))*rad;
-    const rz=num(el.getAttribute('EZKUT'))*rad;
-
-    const T=new THREE.Matrix4().makeTranslation(tx,ty,tz);
-    const R=new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(rx,ry,rz,'YXZ'));
-    return (parentM?parentM.clone():new THREE.Matrix4()).multiply(T).multiply(R);
-  }
-
-  function walkNode(el,par){
-    if(el.getAttribute('EVISIBLE')==='false')return;
-
-    const M=buildElementMatrix(el,par?par.M:null);
-    const tag=el.tagName;
-    const nm=el.getAttribute('ENAME')||el.getAttribute('NAME')||el.getAttribute('ELNAME')||(tag==='ELM'?'ELM':'Element');
-    const isTop=!par;
-
-    if(isTop){
-      out.cabs.push({
-        name:nm,
-        w:el.getAttribute('ESIRINA'),
-        h:el.getAttribute('EVISINA'),
-        d:el.getAttribute('EDUBINA')
-      });
-    }
-
-    const cabIdx=isTop?(out.cabs.length-1):par.cab;
-    const nodeInfo={
-      name:(par?par.name+' / ':'')+nm,
-      short:nm,
-      M,
-      path:[...(par?par.path:[]),++fid],
-      cab:cabIdx,
-      fr:!!((par&&par.fr)||/fronta/i.test(el.getAttribute('ECLAS')||'')||el.getAttribute('ETIPE')==='7')
-    };
-
-    if(tag==='ELM'&&(el.getAttribute('ETIPE')==='16'||/nozka|nóżk/i.test(nm))){
-      const r=25,h=num(el.getAttribute('EVISINA'),100);
-      out.push({
-        name:nm,
-        parent:par?par.name:'',
-        mat:'Nóżka',
-        smjer:-1,
-        shape:'cyl',
-        path:nodeInfo.path,
-        cab:cabIdx,
-        fr:false,
-        m:[-r,0,-r],
-        s:[2*r,h,2*r],
-        M:M.toArray()
-      });
-    }
-
-    // Formatki na bieżącym poziomie (DASKE > AD lub bezpośrednie AD)
-    const ads=[
-      ...childContainerItems(el,'DASKE','AD'),
-      ...directChildren(el,'AD')
-    ];
-
-    for(const ad of ads){
-      if(ad.getAttribute('VISIBLE')==='false')continue;
-      const T=num(ad.getAttribute('DEBLJINA'));
-      const H=num(ad.getAttribute('VISINA'));
-      const D=num(ad.getAttribute('DUBINA'));
-      const sm=Math.round(num(ad.getAttribute('SMJER')));
-
+  while((m=re.exec(text))){
+    const close=m[1]==='/', tag=m[2], body=m[3], self=/\/\s*$/.test(body);
+    if(tag==='ELEMENT'||tag==='ELM'){
+      if(tag==='ELM'&&!elmClose)continue;
+      if(close){stack.pop();continue}
+      const a=attrs(body), par=stack[stack.length-1];
+      if(a.EVISIBLE==='false'){
+        if(!self)stack.push({name:'',short:'',M:par?par.M.clone():new THREE.Matrix4(),path:par?par.path:[],cab:par?par.cab:0,fr:false,skip:true});
+        continue;
+      }
+      if(par&&par.skip){
+        if(!self)stack.push({name:'',short:'',M:par.M.clone(),path:par.path,cab:par.cab,fr:false,skip:true});
+        continue;
+      }
+      const pk=q=>{for(const k in a)if(q.test(k))return num(a[k]);return 0};
+      const T=new THREE.Matrix4().makeTranslation(pk(/^E?X(POS|POX)$/),pk(/^E?YPOS$/),pk(/^E?ZPOS$/));
+      const R=new THREE.Matrix4().makeRotationFromEuler(
+        new THREE.Euler(num(a.EXKUT)*rad,num(a.EKUT)*rad,num(a.EZKUT)*rad,'YXZ')
+      );
+      const M=(par?par.M.clone():new THREE.Matrix4()).multiply(T).multiply(R);
+      const nm=a.ENAME||a.NAME||a.ELNAME||(tag==='ELM'?'ELM':'Element');
+      if(!par)out.cabs.push({name:nm,w:a.ESIRINA,h:a.EVISINA,d:a.EDUBINA});
+      const f={
+        name:(par?par.name+' / ':'')+nm,
+        short:nm,
+        M,
+        path:[...(par?par.path:[]),++fid],
+        cab:par?par.cab:out.cabs.length-1,
+        fr:!!((par&&par.fr)||/fronta/i.test(a.ECLAS||'')||a.ETIPE==='7'),
+        skip:false
+      };
+      if(tag==='ELM'&&(a.ETIPE==='16'||/nozka|nóżk/i.test(nm))){
+        const r=25,h=num(a.EVISINA,100);
+        out.push({
+          name:nm,parent:par?par.name:'',mat:'Nóżka',smjer:-1,shape:'cyl',
+          path:f.path,cab:f.cab,m:[-r,0,-r],s:[2*r,h,2*r],M:M.toArray()
+        });
+      }
+      if(!self)stack.push(f);
+    }else if(!close){
+      const a=attrs(body);
+      if(a.VISIBLE==='false')continue;
+      const f=stack[stack.length-1]||{name:'(bez elementu)',short:'',M:new THREE.Matrix4(),cab:0,fr:false,skip:false};
+      if(f.skip)continue;
+      const T=num(a.DEBLJINA),H=num(a.VISINA),D=num(a.DUBINA),sm=Math.round(num(a.SMJER));
       let s,zFrontDepth=true;
       if(sm===1){s=[D,H,T];zFrontDepth=false}
       else if(sm===2){s=[H,T,D]}
       else s=[T,H,D];
-
-      const x=num(ad.getAttribute('DXPOS'));
-      const y=num(ad.getAttribute('DYPOS'));
-      const z=num(ad.getAttribute('DZPOS'));
+      const x=num(a.DXPOS),y=num(a.DYPOS),z=num(a.DZPOS);
       const zmin=zFrontDepth?z-s[2]:z;
-
       if(Math.min(...s)<0.5)continue;
-
-      const tipFronte=ad.getAttribute('TIPFRONTE');
-      const isFront=!!(nodeInfo.fr||(tipFronte&&tipFronte!=='0'));
-
       out.push({
-        name:(nodeInfo.path.length>1?nodeInfo.short+': ':'')+(ad.getAttribute('DNAME')||'Formatka'),
-        parent:nodeInfo.name,
-        mat:ad.getAttribute('MATNAME')||'',
-        cab:cabIdx,
-        path:nodeInfo.path,
-        fr:isFront,
+        name:(stack.length>1?f.short+': ':'')+(a.DNAME||'Formatka'),
+        parent:f.name,
+        mat:a.MATNAME||'',
+        cab:f.cab,
+        path:f.path,
+        fr:!!(f.fr||(a.TIPFRONTE&&a.TIPFRONTE!=='0')),
         smjer:sm,
         m:[x,y,zmin],
         s,
-        M:M.toArray()
+        M:f.M.toArray()
       });
     }
-
-    // Kolejne poziomy zagnieżdżenia: ELMLIST > ELM, bezpośrednie ELM oraz zagnieżdżone ELEMENT
-    const children=[
-      ...childContainerItems(el,'ELMLIST','ELM'),
-      ...directChildren(el,'ELM'),
-      ...directChildren(el,'ELEMENT')
-    ];
-    for(const child of children){
-      walkNode(child,nodeInfo);
-    }
   }
-
-  const root=doc.documentElement;
-  const topElements=[
-    ...directChildren(root,'ELEMENT'),
-    ...directChildren(root,'ELM')
-  ];
-  for(const el of topElements){
-    walkNode(el,null);
-  }
-
   return out;
 }
 
