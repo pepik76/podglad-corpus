@@ -38,10 +38,7 @@ button:active,.btn:active{background:var(--hi)}
 #list button{width:100%;justify-content:flex-start;border-radius:0;border-width:0 0 1px;min-height:46px;font-weight:600;font-size:15px;text-align:left;white-space:normal}
 #list button.sel{background:var(--hi)}
 #list button.hid{opacity:.4;text-decoration:line-through}
-#drop{position:absolute;inset:0;display:flex;flex-direction:column;gap:14px;align-items:center;justify-content:center;text-align:center;padding:20px;cursor:pointer}
-#drop h2{margin:0;font-size:26px}
 body.drag #stage{outline:6px dashed var(--acc);outline-offset:-6px}
-input[type=file]{display:none}
 [hidden]{display:none!important}
 .sg{padding:6px 12px;background:#e6eaee;font-weight:700;font-size:13px;border-bottom:1px solid #c3cad2}
 label.chk{display:inline-flex;align-items:center;gap:8px;min-height:48px;padding:0 12px;border:2px solid var(--line);border-radius:10px;font-weight:700;font-size:16px;background:#fff;cursor:pointer}
@@ -50,19 +47,24 @@ label.chk input{width:24px;height:24px;accent-color:var(--acc)}
 .lab{position:absolute;transform:translate(-50%,-50%);pointer-events:none;white-space:pre;text-align:center;font-weight:700;border-radius:6px;padding:3px 7px;display:none}
 .lab.cab{background:#10151a;color:#fff;font-size:14px;line-height:1.25}
 .lab.dim{background:#fff;color:#d00000;border:1.5px solid #d00000;font-size:13px;padding:1px 5px}
+#loader{position:fixed;inset:0;z-index:20;background:rgba(255,255,255,.93);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;text-align:center;padding:20px;font-weight:700;font-size:22px}
+.spin{width:60px;height:60px;border:7px solid #cfd6de;border-top-color:var(--acc);border-radius:50%;animation:sp 1s linear infinite}
+@keyframes sp{to{transform:rotate(360deg)}}
+#loader small{font-weight:600;font-size:15px;color:#4a5560;word-break:break-all}
+#loader.err .spin{display:none}#loader.err #ltxt{color:#d00000}
+#lbtn{display:flex;gap:10px}
 </style>
 </head>
 <body>
 <div id="app">
  <header><div id="title">Brak projektu</div><button id="bList" hidden>Lista</button></header>
- <input id="f" type="file">
+ <div id="loader" hidden><div class="spin"></div><div id="ltxt">Ładowanie pliku…</div><small id="lsub"></small><div id="lbtn" hidden><button id="lretry">Spróbuj ponownie</button><button id="lclose">Zamknij</button></div></div>
  <div id="stage">
   <div id="view"></div>
   <div id="labs"></div>
   <div id="cubebox"><div id="cube"></div><button id="home" title="Widok domyślny">⌂</button></div>
   <div id="info"></div>
   <aside id="list"></aside>
-  <div id="drop"><h2>Przeciągnij tutaj plik .s3d</h2><div>albo dotknij, żeby go wybrać. Plik nie opuszcza Twojego urządzenia.</div></div>
  </div>
  <div id="tools">
   <section><h5>Zaznaczanie</h5><div class="row">
@@ -82,6 +84,7 @@ label.chk input{width:24px;height:24px;accent-color:var(--acc)}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.1.0/pako.min.js"></script>
 <script>
+const SCRIPT_URL=''; /* tu wklej adres wdrożenia skryptu Google (Apps Script), kończy się na /exec */
 const S=0.001, $=id=>document.getElementById(id);
 let anim=null,cubeRen,cubeScene,cubeCam,cubeZones=[],cubeHover=null;
 let labEls=[],dimGroup=null,dimGroups=[],curG=null,curCi=0;
@@ -138,7 +141,6 @@ function build(list,label){
   bb.getCenter(center); radius=Math.max(bb.getSize(new THREE.Vector3()).length()/2,.1);
   $('ex').value=0; xray=false; $('bX').classList.remove('on');
   $('title').textContent=label+' — formatek: '+boards.length;
-  $('drop').style.display='none';
   makeAnnotations(list.cabs&&list.cabs.length?list.cabs:[{name:label}]);
   setView('iso'); listCab=-2; refresh();
 }
@@ -365,19 +367,44 @@ function parseCorpus(text){
   }
   return out;
 }
-async function loadFile(f){
+let lastTry=null;
+const paint=()=>new Promise(r=>setTimeout(r,40));
+function showLoader(txt,sub){const l=$('loader');l.classList.remove('err');l.hidden=false;$('ltxt').textContent=txt;$('lsub').textContent=sub||'';$('lbtn').hidden=true}
+function hideLoader(){$('loader').hidden=true}
+function showErr(msg,retry){const l=$('loader');l.classList.add('err');l.hidden=false;$('ltxt').textContent=msg;$('lsub').textContent='';$('lbtn').hidden=false;$('lretry').hidden=!retry;lastTry=retry||null}
+async function loadBytes(u8,name){
+  showLoader('Ładowanie pliku…',name);await paint();
   try{
-    const list=parseCorpus(decode(await unpack(new Uint8Array(await f.arrayBuffer()))));
-    if(!list.length){alert('Nie znaleziono żadnych formatek w tym pliku.');return}
-    build(list,f.name);
-  }catch(err){alert('Nie udało się wczytać pliku: '+err.message)}
+    const list=parseCorpus(decode(await unpack(u8)));
+    if(!list.length){showErr('Nie znaleziono żadnych formatek w tym pliku.');return}
+    build(list,name);hideLoader();
+  }catch(err){showErr('Nie udało się wczytać pliku: '+err.message)}
+}
+async function loadFile(f){
+  showLoader('Ładowanie pliku…',f.name);await paint();
+  loadBytes(new Uint8Array(await f.arrayBuffer()),f.name);
+}
+async function loadById(id){
+  if(!SCRIPT_URL){showErr('Brak adresu skryptu Google w pliku podglądu.');return}
+  showLoader('Ładowanie pliku…','Pobieranie z Dysku Google');
+  try{
+    const ac=new AbortController(),to=setTimeout(()=>ac.abort(),90000);
+    const r=await fetch(SCRIPT_URL+'?id='+encodeURIComponent(id),{signal:ac.signal});clearTimeout(to);
+    if(!r.ok)throw new Error('serwer odpowiedział '+r.status);
+    const j=await r.json();if(j.error)throw new Error(j.error);
+    const bin=atob(j.base64),u8=new Uint8Array(bin.length);
+    for(let k=0;k<bin.length;k++)u8[k]=bin.charCodeAt(k);
+    await loadBytes(u8,j.name||'projekt.s3d');
+  }catch(err){showErr('Nie udało się pobrać pliku ('+(err.name==='AbortError'?'przekroczono czas':err.message)+').',()=>loadById(id))}
 }
 
 /* ---------- UI ---------- */
 init();
-$('f').onchange=e=>{if(e.target.files[0])loadFile(e.target.files[0]);e.target.value=''};
 $('bList').onclick=()=>$('list').classList.toggle('open');
-$('drop').onclick=()=>$('f').click();
+$('lretry').onclick=()=>lastTry&&lastTry();
+$('lclose').onclick=hideLoader;
+const qid=new URLSearchParams(location.search).get('id');
+if(qid)loadById(qid);
 $('home').onclick=()=>boards.length&&flyTo(v3(1,.8,1));
 document.querySelectorAll('[data-lv]').forEach(b=>b.onclick=()=>{selLevel=b.dataset.lv;document.querySelectorAll('[data-lv]').forEach(x=>x.classList.toggle('on',x===b));clearSel();refresh()});
 $('bHide').onclick=()=>{if(sel>=0){selSet.forEach(i=>boards[i].hidden=true);clearSel();refresh()}};
