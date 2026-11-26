@@ -154,7 +154,7 @@ function makeWallHatchTexture(){
   return tex;
 }
 
-function parseOutlinePoints(krData){
+function parseCurvePoints(krData){
   if(!krData||krData.indexOf('PTX=')<0)return [];
   const match=krData.match(/CURVE=-1\b([\s\S]*?)(?:,CURVE=|$)/);
   const seg=match?match[1]:krData;
@@ -165,7 +165,7 @@ function parseOutlinePoints(krData){
   for(let i=0;i<parts.length;i++){
     const item=parts[i].replace(/^"+|"+$/g,'');
     if(item.startsWith('PTOCKA=')){
-      cur={x:0,z:0};
+      cur={x:0,z:0,style:0,arcR:0};
       pts.push(cur);
     }else if(!cur){
       continue;
@@ -173,12 +173,78 @@ function parseOutlinePoints(krData){
       cur.x=num(item.slice(4))*1000;
     }else if(item.startsWith('PTZ=')){
       cur.z=num(item.slice(4))*1000;
+    }else if(item.startsWith('PTSTYLE=')){
+      cur.style=Math.round(num(item.slice(8)));
+    }else if(item.startsWith('PTARRA=')){
+      cur.arcR=num(item.slice(7))*1000;
     }
   }
   return pts.filter(p=>Number.isFinite(p.x)&&Number.isFinite(p.z));
 }
 
-function hasCutout(pts,H,D){
+function appendShapeSegment(shape,prev,curr,scaleX,scaleY,minX,minZ,offX,offZ){
+  const x1=((prev.x-minX)*scaleX-offX)*S;
+  const y1=((prev.z-minZ)*scaleY-offZ)*S;
+  const x2=((curr.x-minX)*scaleX-offX)*S;
+  const y2=((curr.z-minZ)*scaleY-offZ)*S;
+  const rMm=prev.arcR*Math.min(scaleX,scaleY);
+  const chordMm=Math.hypot((curr.x-prev.x)*scaleX,(curr.z-prev.z)*scaleY);
+  if(prev.style===2&&rMm>0.05&&chordMm>0.05){
+    const r=Math.max(rMm,chordMm/2+0.01);
+    const mx=(x1+x2)/2, my=(y1+y2)/2;
+    const dx=x2-x1, dy=y2-y1;
+    const len=Math.hypot(dx,dy);
+    const h=Math.sqrt(Math.max(0,r*r-(chordMm*S/2)*(chordMm*S/2)));
+    const cx=mx+(-dy/len)*h;
+    const cy=my+(dx/len)*h;
+    shape.quadraticCurveTo(cx,cy,x2,y2);
+  }else{
+    shape.lineTo(x2,y2);
+  }
+}
+
+function makeHandleProfileGeometry(d){
+  const isHandle=/truckicaelement|profil.*zobal|zobal.*profil/i.test((d.eclas||'')+' '+(d.parent||'')+' '+(d.name||''));
+  if(!isHandle||!d.curveData)return null;
+  const pts=parseCurvePoints(d.curveData);
+  if(pts.length<3)return null;
+
+  let minX=Infinity,maxX=-Infinity,minZ=Infinity,maxZ=-Infinity;
+  for(const p of pts){
+    if(p.x<minX)minX=p.x;
+    if(p.x>maxX)maxX=p.x;
+    if(p.z<minZ)minZ=p.z;
+    if(p.z>maxZ)maxZ=p.z;
+  }
+  const spanX=maxX-minX, spanZ=maxZ-minZ;
+  if(spanX<0.5||spanZ<0.5)return null;
+
+  const shape=new THREE.Shape();
+  shape.moveTo((pts[0].x-minX-spanX/2)*S,(pts[0].z-minZ-spanZ/2)*S);
+  for(let i=1;i<pts.length;i++){
+    appendShapeSegment(shape,pts[i-1],pts[i],1,1,minX,minZ,spanX/2,spanZ/2);
+  }
+  shape.closePath();
+
+  const lenMm=Math.max(num(d.lenMm),...d.s,10);
+  const geo=new THREE.ExtrudeGeometry(shape,{
+    depth:lenMm*S,
+    bevelEnabled:false,
+    curveSegments:12
+  });
+  geo.translate(0,0,-(lenMm*S)/2);
+  if(d.sm===0){
+    geo.rotateY(Math.PI/2);
+  }else if(d.sm===1){
+    geo.rotateX(-Math.PI/2);
+  }else{
+    geo.rotateX(Math.PI/2);
+  }
+  geo.computeBoundingBox();
+  return geo;
+}
+
+function hasCutout(pts){
   if(pts.length<5)return false;
   let minX=Infinity,maxX=-Infinity,minZ=Infinity,maxZ=-Infinity;
   for(const p of pts){
@@ -190,20 +256,18 @@ function hasCutout(pts,H,D){
   const spanX=maxX-minX, spanZ=maxZ-minZ;
   if(spanX<10||spanZ<10)return false;
   const tol=1.5;
-  let innerCount=0;
   for(const p of pts){
     const onEdgeX=Math.abs(p.x-minX)<=tol||Math.abs(p.x-maxX)<=tol;
     const onEdgeZ=Math.abs(p.z-minZ)<=tol||Math.abs(p.z-maxZ)<=tol;
-    if(!onEdgeX&&!onEdgeZ)innerCount++;
+    if(!onEdgeX&&!onEdgeZ)return true;
   }
-  return innerCount>=2&&(Math.abs(spanX-H)<15||Math.abs(spanZ-D)<15||pts.length>5);
+  return false;
 }
 
 function makeCutoutGeometry(d){
   if(d.shape==='cyl'||!d.curveData||d.sm!==0)return null;
-  const pts=parseOutlinePoints(d.curveData);
-  const H=d.s[1], D=d.s[2], T=d.s[0];
-  if(!hasCutout(pts,H,D))return null;
+  const pts=parseCurvePoints(d.curveData);
+  if(!hasCutout(pts))return null;
 
   let minX=Infinity,maxX=-Infinity,minZ=Infinity,maxZ=-Infinity;
   for(const p of pts){
@@ -213,20 +277,20 @@ function makeCutoutGeometry(d){
     if(p.z>maxZ)maxZ=p.z;
   }
   const spanX=Math.max(maxX-minX,1), spanZ=Math.max(maxZ-minZ,1);
+  const H=d.s[1], D=d.s[2], T=d.s[0];
   const sx=H/spanX, sz=D/spanZ;
 
   const shape=new THREE.Shape();
-  pts.forEach((p,idx)=>{
-    const u=((p.x-minX)*sx-H/2)*S;
-    const v=((p.z-minZ)*sz-D/2)*S;
-    if(idx===0)shape.moveTo(u,v);
-    else shape.lineTo(u,v);
-  });
+  shape.moveTo(((pts[0].x-minX)*sx-H/2)*S,((pts[0].z-minZ)*sz-D/2)*S);
+  for(let i=1;i<pts.length;i++){
+    appendShapeSegment(shape,pts[i-1],pts[i],sx,sz,minX,minZ,H/2,D/2);
+  }
   shape.closePath();
 
   const geo=new THREE.ExtrudeGeometry(shape,{
     depth:T*S,
-    bevelEnabled:false
+    bevelEnabled:false,
+    curveSegments:10
   });
   geo.translate(0,0,-(T*S)/2);
   geo.rotateY(Math.PI/2);
@@ -237,12 +301,12 @@ function makeCutoutGeometry(d){
 function geoFor(d,withEdges){
   const key=d.shape==='cyl'
     ?'c'+d.s[0]+'_'+d.s[1]
-    :'b'+d.s.join('_')+(d.sm===0&&d.curveData?'_k'+d.curveData.length:'');
+    :'b'+d.s.join('_')+'_'+(d.lenMm||0)+'_'+(d.eclas||'')+(d.curveData?'_k'+d.curveData.length:'');
   let g=geoCache.get(key);
   if(!g){
     const geo=d.shape==='cyl'
       ?new THREE.CylinderGeometry(d.s[0]/2*S,d.s[0]/2*S,d.s[1]*S,24)
-      :(makeCutoutGeometry(d)||new THREE.BoxGeometry(d.s[0]*S,d.s[1]*S,d.s[2]*S));
+      :(makeHandleProfileGeometry(d)||makeCutoutGeometry(d)||new THREE.BoxGeometry(d.s[0]*S,d.s[1]*S,d.s[2]*S));
     g={geo,edges:withEdges?new THREE.EdgesGeometry(geo,28):null};
     geoCache.set(key,g);
   }else if(withEdges&&!g.edges){
@@ -344,7 +408,7 @@ function resize(){
 function colorFor(b){
   if(b.wall)return 0xc7d0d8;
   const n=(b.name||'').toLowerCase(),p=(b.parent||'').toLowerCase();
-  if(/uchwyt/.test(p+n))return 0x8d98a5;
+  if(/uchwyt|profil/.test(p+n))return 0x8d98a5;
   if(b.fr)return 0x5b8fd9;
   if(b.shape==='cyl'||/nozka|nóżk|stopk|axilo/.test(p+n))return 0x2b2f33;
   if(/front|drzw|czo[lł]o|fr_/.test(n))return 0x5b8fd9;
@@ -897,7 +961,6 @@ function parseCorpus(text){
   while((m=re.exec(text))){
     const close=m[1]==='/', tag=m[2], body=m[3], self=/\/\s*$/.test(body);
 
-    // szybkie przeskakiwanie ciężkich bloków bez parsowania wnętrza
     if(tag==='ELINKS'||tag==='EFVK'||tag==='SELBOX'||tag==='POTROSNI'||tag==='RUPE'||tag==='DKOTE'){
       if(!close&&!self){
         const endTag='</'+tag+'>';
@@ -921,11 +984,11 @@ function parseCorpus(text){
       if(close){stack.pop();continue}
       const a=attrs(body), par=stack[stack.length-1];
       if(a.EVISIBLE==='false'){
-        if(!self)stack.push({name:'',short:'',M:par?par.M.clone():new THREE.Matrix4(),path:par?par.path:[],cab:par?par.cab:0,fr:false,wall:false,tp:'',skip:true});
+        if(!self)stack.push({name:'',short:'',eclas:'',lenMm:0,M:par?par.M.clone():new THREE.Matrix4(),path:par?par.path:[],cab:par?par.cab:0,fr:false,wall:false,tp:'',skip:true});
         continue;
       }
       if(par&&par.skip){
-        if(!self)stack.push({name:'',short:'',M:par.M.clone(),path:par.path,cab:par.cab,fr:false,wall:false,tp:'',skip:true});
+        if(!self)stack.push({name:'',short:'',eclas:'',lenMm:0,M:par.M.clone(),path:par.path,cab:par.cab,fr:false,wall:false,tp:'',skip:true});
         continue;
       }
       const pk=q=>{for(const k in a)if(q.test(k))return num(a[k]);return 0};
@@ -940,6 +1003,8 @@ function parseCorpus(text){
       const f={
         name:(par?par.name+' / ':'')+nm,
         short:nm,
+        eclas:a.ECLAS||'',
+        lenMm:num(a.ESIRINA,0),
         M,
         path:[...(par?par.path:[]),++fid],
         cab:par?par.cab:out.cabs.length-1,
@@ -960,7 +1025,7 @@ function parseCorpus(text){
       if(close){lastAd=null;continue}
       const a=attrs(body);
       if(a.VISIBLE==='false'){lastAd=null;continue}
-      const f=stack[stack.length-1]||{name:'(bez elementu)',short:'',M:new THREE.Matrix4(),cab:0,fr:false,wall:false,tp:'',skip:false};
+      const f=stack[stack.length-1]||{name:'(bez elementu)',short:'',eclas:'',lenMm:0,M:new THREE.Matrix4(),cab:0,fr:false,wall:false,tp:'',skip:false};
       if(f.skip){lastAd=null;continue}
       if(f.tp==='16'||/^makro/i.test(a.DNAME||'')){lastAd=null;continue}
       const T=num(a.DEBLJINA),H=num(a.VISINA),D=num(a.DUBINA),sm=Math.round(num(a.SMJER));
@@ -974,6 +1039,8 @@ function parseCorpus(text){
       const item={
         name:(stack.length>1?f.short+': ':'')+(a.DNAME||'Formatka'),
         parent:f.name,
+        eclas:f.eclas||'',
+        lenMm:f.lenMm||0,
         mat:a.MATNAME||'',
         cab:f.cab,
         path:f.path,
