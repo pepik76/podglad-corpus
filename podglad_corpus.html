@@ -178,7 +178,7 @@ function parseOutlinePoints(krData){
   return pts.filter(p=>Number.isFinite(p.x)&&Number.isFinite(p.z));
 }
 
-function hasCutout(pts){
+function hasCustomContour(pts){
   if(pts.length<5)return false;
   let minX=Infinity,maxX=-Infinity,minZ=Infinity,maxZ=-Infinity;
   for(const p of pts){
@@ -187,21 +187,14 @@ function hasCutout(pts){
     if(p.z<minZ)minZ=p.z;
     if(p.z>maxZ)maxZ=p.z;
   }
-  const spanX=maxX-minX, spanZ=maxZ-minZ;
-  if(spanX<10||spanZ<10)return false;
-  const tol=1.5;
-  for(const p of pts){
-    const onEdgeX=Math.abs(p.x-minX)<=tol||Math.abs(p.x-maxX)<=tol;
-    const onEdgeZ=Math.abs(p.z-minZ)<=tol||Math.abs(p.z-maxZ)<=tol;
-    if(!onEdgeX&&!onEdgeZ)return true;
-  }
-  return false;
+  return (maxX-minX)>=10&&(maxZ-minZ)>=10;
 }
 
 function makeCutoutGeometry(d){
-  if(d.shape==='cyl'||!d.curveData||d.sm!==0)return null;
+  if(d.shape==='cyl'||!d.curveData)return null;
+  if(d.sm!==0&&d.sm!==1)return null;
   const pts=parseOutlinePoints(d.curveData);
-  if(!hasCutout(pts))return null;
+  if(!hasCustomContour(pts))return null;
 
   let minX=Infinity,maxX=-Infinity,minZ=Infinity,maxZ=-Infinity;
   for(const p of pts){
@@ -211,13 +204,34 @@ function makeCutoutGeometry(d){
     if(p.z>maxZ)maxZ=p.z;
   }
   const spanX=Math.max(maxX-minX,1), spanZ=Math.max(maxZ-minZ,1);
-  const H=d.s[1], D=d.s[2], T=d.s[0];
-  const sx=H/spanX, sz=D/spanZ;
-
-  // ustawienie głębokości wzdłuż osi Z oraz wysokości wzdłuż osi Y, aby podcięcie wypadało od strony frontu
   const shape=new THREE.Shape();
+
+  if(d.sm===0){
+    const H=d.s[1], D=d.s[2], T=d.s[0];
+    const sx=H/spanX, sz=D/spanZ;
+    pts.forEach((p,idx)=>{
+      const u=-((p.z-minZ)*sz-D/2)*S;
+      const v=((p.x-minX)*sx-H/2)*S;
+      if(idx===0)shape.moveTo(u,v);
+      else shape.lineTo(u,v);
+    });
+    shape.closePath();
+
+    const geo=new THREE.ExtrudeGeometry(shape,{
+      depth:T*S,
+      bevelEnabled:false
+    });
+    geo.translate(0,0,-(T*S)/2);
+    geo.rotateY(-Math.PI/2);
+    geo.computeBoundingBox();
+    return geo;
+  }
+
+  // sm===1: d.s = [D, H, T], w przestrzeni lokalnej X odpowiada szerokości (d.s[0]), Y wysokości (d.s[1]), Z grubości (d.s[2])
+  const W=d.s[0], H=d.s[1], T=d.s[2];
+  const sx=H/spanX, sz=W/spanZ;
   pts.forEach((p,idx)=>{
-    const u=-((p.z-minZ)*sz-D/2)*S;
+    const u=((p.z-minZ)*sz-W/2)*S;
     const v=((p.x-minX)*sx-H/2)*S;
     if(idx===0)shape.moveTo(u,v);
     else shape.lineTo(u,v);
@@ -229,7 +243,6 @@ function makeCutoutGeometry(d){
     bevelEnabled:false
   });
   geo.translate(0,0,-(T*S)/2);
-  geo.rotateY(-Math.PI/2);
   geo.computeBoundingBox();
   return geo;
 }
@@ -237,7 +250,7 @@ function makeCutoutGeometry(d){
 function geoFor(d,withEdges){
   const key=d.shape==='cyl'
     ?'c'+d.s[0]+'_'+d.s[1]
-    :'b'+d.s.join('_')+(d.sm===0&&d.curveData?'_k'+d.curveData.length:'');
+    :'b'+d.s.join('_')+'_'+(d.sm||0)+(d.curveData?'_k'+d.curveData.length:'');
   let g=geoCache.get(key);
   if(!g){
     const geo=d.shape==='cyl'
