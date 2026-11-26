@@ -182,10 +182,12 @@ function parseCurvePoints(krData){
   return pts.filter(p=>Number.isFinite(p.x)&&Number.isFinite(p.z));
 }
 
-function appendShapeSegment(shape,prev,curr,scaleX,scaleY,minX,minZ,offX,offZ){
-  const x1=((prev.x-minX)*scaleX-offX)*S;
+function appendShapeSegment(shape,prev,curr,scaleX,scaleY,minX,minZ,offX,offZ,flipU){
+  const rawU=(prev.x-minX)*scaleX-offX;
+  const rawU2=(curr.x-minX)*scaleX-offX;
+  const x1=(flipU?-rawU:rawU)*S;
   const y1=((prev.z-minZ)*scaleY-offZ)*S;
-  const x2=((curr.x-minX)*scaleX-offX)*S;
+  const x2=(flipU?-rawU2:rawU2)*S;
   const y2=((curr.z-minZ)*scaleY-offZ)*S;
   const rMm=prev.arcR*Math.min(scaleX,scaleY);
   const chordMm=Math.hypot((curr.x-prev.x)*scaleX,(curr.z-prev.z)*scaleY);
@@ -219,10 +221,15 @@ function makeHandleProfileGeometry(d){
   const spanX=maxX-minX, spanZ=maxZ-minZ;
   if(spanX<0.5||spanZ<0.5)return null;
 
+  const boxDims=[...d.s].sort((a,b)=>a-b);
+  const targetH=Math.max(boxDims[1]||spanX,2);
+  const targetD=Math.max(boxDims[2]||spanZ,2);
+  const sx=targetH/spanX, sz=targetD/spanZ;
+
   const shape=new THREE.Shape();
-  shape.moveTo((pts[0].x-minX-spanX/2)*S,(pts[0].z-minZ-spanZ/2)*S);
+  shape.moveTo(((pts[0].x-minX)*sx-targetH/2)*S,((pts[0].z-minZ)*sz-targetD/2)*S);
   for(let i=1;i<pts.length;i++){
-    appendShapeSegment(shape,pts[i-1],pts[i],1,1,minX,minZ,spanX/2,spanZ/2);
+    appendShapeSegment(shape,pts[i-1],pts[i],sx,sz,minX,minZ,targetH/2,targetD/2,false);
   }
   shape.closePath();
 
@@ -230,7 +237,7 @@ function makeHandleProfileGeometry(d){
   const geo=new THREE.ExtrudeGeometry(shape,{
     depth:lenMm*S,
     bevelEnabled:false,
-    curveSegments:12
+    curveSegments:8
   });
   geo.translate(0,0,-(lenMm*S)/2);
   if(d.sm===0){
@@ -281,16 +288,18 @@ function makeCutoutGeometry(d){
   const sx=H/spanX, sz=D/spanZ;
 
   const shape=new THREE.Shape();
-  shape.moveTo(((pts[0].x-minX)*sx-H/2)*S,((pts[0].z-minZ)*sz-D/2)*S);
+  const u0=-((pts[0].x-minX)*sx-H/2)*S;
+  const v0=((pts[0].z-minZ)*sz-D/2)*S;
+  shape.moveTo(u0,v0);
   for(let i=1;i<pts.length;i++){
-    appendShapeSegment(shape,pts[i-1],pts[i],sx,sz,minX,minZ,H/2,D/2);
+    appendShapeSegment(shape,pts[i-1],pts[i],sx,sz,minX,minZ,H/2,D/2,true);
   }
   shape.closePath();
 
   const geo=new THREE.ExtrudeGeometry(shape,{
     depth:T*S,
     bevelEnabled:false,
-    curveSegments:10
+    curveSegments:8
   });
   geo.translate(0,0,-(T*S)/2);
   geo.rotateY(Math.PI/2);
