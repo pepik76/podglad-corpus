@@ -214,10 +214,10 @@ function makeCutoutGeometry(d){
   const H=d.s[1], D=d.s[2], T=d.s[0];
   const sx=H/spanX, sz=D/spanZ;
 
-  // po obrocie o 90 stopni wokół osi Y: oś kształtu X trafia na -Z, a oś kształtu Y trafia na +Y
+  // ustawienie głębokości wzdłuż osi Z oraz wysokości wzdłuż osi Y, aby podcięcie wypadało od strony frontu
   const shape=new THREE.Shape();
   pts.forEach((p,idx)=>{
-    const u=((p.z-minZ)*sz-D/2)*S;
+    const u=-((p.z-minZ)*sz-D/2)*S;
     const v=((p.x-minX)*sx-H/2)*S;
     if(idx===0)shape.moveTo(u,v);
     else shape.lineTo(u,v);
