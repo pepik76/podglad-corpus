@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Podgląd Corpus .s3d</title>
+<title>Podgląd Corpus</title>
 <style>
 :root{--bg:#eef1f4;--ink:#10151a;--panel:#fff;--line:#10151a;--acc:#0a5cff;--hi:#ffc400}
 *{box-sizing:border-box}
@@ -103,6 +103,7 @@ label.chk input{width:22px;height:22px;accent-color:var(--acc)}
    <h5>Widoczność</h5>
    <div class="row">
     <label class="chk"><input type="checkbox" id="cFr">Ukryj fronty</label>
+    <label class="chk"><input type="checkbox" id="cWa">Ukryj ściany</label>
     <button id="bX">Przezroczystość</button>
     <button id="bAll">Pokaż wszystko</button>
    </div>
@@ -129,11 +130,30 @@ let scene,cam,ren,ctl,group,boards=[];
 let mode='project', activeCab=-1;
 let sel=-1, selSet=new Set(), selLevel='board', listCab=-2, xray=false;
 let center=null, radius=1, lastTry=null, docName='';
-let dirty=true, exVal=0, viewW=1, viewH=1, edgeMats=null;
+let dirty=true, exVal=0, viewW=1, viewH=1, edgeMats=null, wallHatchTex=null;
 const geoCache=new Map(), matCache=new Map();
 const need=()=>{dirty=true};
 
-/* ---------- cache geometrii i materiałów ---------- */
+function makeWallHatchTexture(){
+  const c=document.createElement('canvas');
+  c.width=c.height=64;
+  const x=c.getContext('2d');
+  x.fillStyle='#ffffff';
+  x.fillRect(0,0,64,64);
+  x.strokeStyle='rgba(30,41,59,0.34)';
+  x.lineWidth=2;
+  for(let k=-64;k<=128;k+=8){
+    x.beginPath();
+    x.moveTo(k,0);
+    x.lineTo(k+64,64);
+    x.stroke();
+  }
+  const tex=new THREE.CanvasTexture(c);
+  tex.wrapS=tex.wrapT=THREE.RepeatWrapping;
+  tex.repeat.set(3,3);
+  return tex;
+}
+
 function geoFor(d){
   const key=d.shape==='cyl'?'c'+d.s[0]+'_'+d.s[1]:'b'+d.s.join('_');
   let g=geoCache.get(key);
@@ -146,12 +166,14 @@ function geoFor(d){
   }
   return g;
 }
-function matFor(col,st){
-  const k=st==='s'?'s':col+'_'+st;
+function matFor(col,st,isWall){
+  const k=st==='s'?'s':col+'_'+st+(isWall?'_w':'');
   let m=matCache.get(k);
   if(m)return m;
   m=new THREE.MeshLambertMaterial({
-    color:st==='s'?0xffc400:col,side:THREE.DoubleSide,
+    color:st==='s'?0xffc400:col,
+    map:st!=='s'&&isWall?wallHatchTex:null,
+    side:THREE.DoubleSide,
     polygonOffset:true,polygonOffsetFactor:1,polygonOffsetUnits:1
   });
   if(st==='x'){m.transparent=true;m.opacity=.22;m.depthWrite=false}
@@ -164,9 +186,9 @@ function disposeScene(){
   matCache.forEach(m=>m.dispose());matCache.clear();
 }
 
-/* ---------- inicjalizacja ---------- */
 function init(){
   center=new THREE.Vector3();
+  wallHatchTex=makeWallHatchTexture();
   edgeMats={n:new THREE.LineBasicMaterial({color:0x10151a}),s:new THREE.LineBasicMaterial({color:0xd00000})};
   const v=$('view');
   scene=new THREE.Scene();
@@ -192,7 +214,6 @@ function init(){
   new ResizeObserver(resize).observe(v);
   resize();
 
-  // klik: tylko lewy przycisk / jeden palec, bez gestów wielodotykowych
   const dom=ren.domElement, ptrs=new Set();
   let p0=null;
   dom.addEventListener('pointerdown',e=>{
@@ -237,6 +258,7 @@ function resize(){
 }
 
 function colorFor(b){
+  if(b.wall)return 0xc7d0d8;
   const n=(b.name||'').toLowerCase(),p=(b.parent||'').toLowerCase();
   if(/uchwyt/.test(p+n))return 0x8d98a5;
   if(b.fr)return 0x5b8fd9;
@@ -247,7 +269,6 @@ function colorFor(b){
   return 0xd6a96a;
 }
 
-/* ---------- budowa sceny ---------- */
 function build(list,label){
   clearLabs();
   disposeScene();
@@ -263,7 +284,7 @@ function build(list,label){
 
     const col=colorFor(d);
     const g=geoFor(d);
-    const m=new THREE.Mesh(g.geo,matFor(col,'n'));
+    const m=new THREE.Mesh(g.geo,matFor(col,'n',!!d.wall));
     const c=new THREE.Vector3(d.m[0]+d.s[0]/2,d.m[1]+d.s[1]/2,d.m[2]+d.s[2]/2)
       .applyMatrix4(M)
       .multiplyScalar(S);
@@ -284,6 +305,7 @@ function build(list,label){
   xray=false;
   $('bX').classList.remove('on');
   $('cFr').checked=false;
+  $('cWa').checked=false;
 
   makeAnnotations(list.cabs&&list.cabs.length?list.cabs:[{name:label}]);
   syncModeUI();
@@ -292,7 +314,6 @@ function build(list,label){
 }
 
 const _bm=new THREE.Matrix4(), _one=new THREE.Vector3(1,1,1);
-// AABB formatki; exploded=false liczy z pozycji bazowej (bez rozstrzelenia)
 function boxOfBoard(b,exploded){
   const g=b.mesh.geometry;
   if(!g.boundingBox)g.computeBoundingBox();
@@ -361,7 +382,6 @@ function stepAnim(){
   if(k>=1)anim=null;
 }
 
-/* ---------- kostka widoku ---------- */
 function initCube(){
   const box=$('cube'),N=112;
   cubeRen=new THREE.WebGLRenderer({antialias:true,alpha:true});
@@ -449,7 +469,6 @@ function setView(n){
 }
 const v3=(x,y,z)=>new THREE.Vector3(x,y,z);
 
-/* ---------- wymiary i etykiety ---------- */
 function clearLabs(){
   $('labs').innerHTML='';
   labEls=[];
@@ -491,7 +510,7 @@ function makeAnnotations(cl){
     const A=new THREE.Box3(),B=new THREE.Box3();
     let any=false;
     boards.forEach(b=>{
-      if((b.cab||0)!==ci)return;
+      if((b.cab||0)!==ci||b.wall)return;
       const bx=boxOfBoard(b,false);
       A.union(bx);
       if(!(b.shape==='cyl'||/uchwyt/i.test(b.parent)))B.union(bx);
@@ -529,7 +548,6 @@ function updateLabs(){
   }
 }
 
-/* ---------- tryb szafki ---------- */
 function currentCabIndex(){
   if(mode==='cabinet')return activeCab;
   return sel>=0?(boards[sel].cab||0):-1;
@@ -594,13 +612,12 @@ function syncModeUI(){
   }
 }
 
-/* ---------- odświeżanie stanu ---------- */
-// samo przesunięcie formatek (suwak rozstrzelenia) – bez przebudowy materiałów i listy
 function applyExplode(){
   exVal=+$('ex').value;
   const k=exVal/100*0.9;
   for(const b of boards){
-    b.mesh.position.copy(b.base).sub(center).multiplyScalar(1+k).add(center);
+    if(b.wall)b.mesh.position.copy(b.base);
+    else b.mesh.position.copy(b.base).sub(center).multiplyScalar(1+k).add(center);
   }
   dimGroups.forEach((g,idx)=>{if(g)g.visible=shouldShowCabDims(idx)});
   need();
@@ -623,11 +640,12 @@ function updateInfo(){
     const b=boards[sel];
     const a=[...b.s].sort((x,y)=>y-x).map(v=>Math.round(v*10)/10);
     info.style.display='block';
-    info.innerHTML='<b></b><br>Wymiary: '+a[0]+' × '+a[1]+' × '+a[2]+' mm<div class="sub">Materiał: <span></span></div><div class="sub">Element nadrzędny: <span></span></div>';
+    info.innerHTML='<b></b><br>Wymiary: '+a[0]+' × '+a[1]+' × '+a[2]+' mm<div class="sub">Typ: <span></span></div><div class="sub">Materiał: <span></span></div><div class="sub">Element nadrzędny: <span></span></div>';
     info.querySelector('b').textContent=b.name;
     const subs=info.querySelectorAll('span');
-    subs[0].textContent=b.mat||'brak';
-    subs[1].textContent=b.parent;
+    subs[0].textContent=b.wall?'Ściana':'Element zabudowy';
+    subs[1].textContent=b.mat||'brak';
+    subs[2].textContent=b.parent;
   }else{
     info.style.display='none';
   }
@@ -642,14 +660,15 @@ function refresh(){
   if(ci<0)$('list').classList.remove('open');
 
   const hideFr=$('cFr').checked;
+  const hideWa=$('cWa').checked;
   boards.forEach((b,i)=>{
     const inScope=mode==='project'||(b.cab||0)===activeCab;
-    b.mesh.visible=inScope&&!b.hidden&&!(hideFr&&b.fr);
+    b.mesh.visible=inScope&&!b.hidden&&!(hideFr&&b.fr)&&!(hideWa&&b.wall);
     const s=selSet.has(i);
     const st=s?'s':(xray?'x':'n');
     if(b.st!==st){
       b.st=st;
-      b.mesh.material=matFor(b.col,st);
+      b.mesh.material=matFor(b.col,st,!!b.wall);
       b.edge.material=s?edgeMats.s:edgeMats.n;
     }
   });
@@ -658,7 +677,7 @@ function refresh(){
     const i=+el.dataset.i;
     const b=boards[i];
     el.classList.toggle('sel',selSet.has(i));
-    el.classList.toggle('hid',!!(b&&(b.hidden||(hideFr&&b.fr))));
+    el.classList.toggle('hid',!!(b&&(b.hidden||(hideFr&&b.fr)||(hideWa&&b.wall))));
   });
 
   applyExplode();
@@ -688,7 +707,7 @@ function pick(e){
   else{clearSel();refresh()}
 }
 function isPart(b){
-  return !(b.shape==='cyl'||/uchwyt|nozka|nóżk|stopk|axilo/i.test((b.parent||'')+' '+(b.name||'')));
+  return !b.wall&&!(b.shape==='cyl'||/uchwyt|nozka|nóżk|stopk|axilo/i.test((b.parent||'')+' '+(b.name||'')));
 }
 function buildList(){
   const l=$('list');
@@ -735,7 +754,6 @@ function buildList(){
   });
 }
 
-/* ---------- wczytywanie i parser Corpusa ---------- */
 const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 function decode(u){
   try{return new TextDecoder('utf-8',{fatal:true}).decode(u)}
@@ -774,6 +792,12 @@ function attrs(s){
   return o;
 }
 
+function isWallTag(a,nm){
+  if(a.ETIPE==='12')return true;
+  const txt=((nm||'')+' '+(a.ECLAS||'')+' '+(a.EIMPORTNAME||'')).toLowerCase();
+  return /(^|[^a-z0-9])(sciana|ściana|wall|zid)([^a-z0-9]|$)/i.test(txt);
+}
+
 function parseCorpus(text){
   const out=[],stack=[];
   out.cabs=[];
@@ -790,11 +814,11 @@ function parseCorpus(text){
       if(close){stack.pop();continue}
       const a=attrs(body), par=stack[stack.length-1];
       if(a.EVISIBLE==='false'){
-        if(!self)stack.push({name:'',short:'',M:par?par.M.clone():new THREE.Matrix4(),path:par?par.path:[],cab:par?par.cab:0,fr:false,skip:true});
+        if(!self)stack.push({name:'',short:'',M:par?par.M.clone():new THREE.Matrix4(),path:par?par.path:[],cab:par?par.cab:0,fr:false,wall:false,tp:'',skip:true});
         continue;
       }
       if(par&&par.skip){
-        if(!self)stack.push({name:'',short:'',M:par.M.clone(),path:par.path,cab:par.cab,fr:false,skip:true});
+        if(!self)stack.push({name:'',short:'',M:par.M.clone(),path:par.path,cab:par.cab,fr:false,wall:false,tp:'',skip:true});
         continue;
       }
       const pk=q=>{for(const k in a)if(q.test(k))return num(a[k]);return 0};
@@ -804,6 +828,7 @@ function parseCorpus(text){
       );
       const M=(par?par.M.clone():new THREE.Matrix4()).multiply(T).multiply(R);
       const nm=a.ENAME||a.NAME||a.ELNAME||(tag==='ELM'?'ELM':'Element');
+      const isWall=!!((par&&par.wall)||isWallTag(a,nm));
       if(!par)out.cabs.push({name:nm,w:a.ESIRINA,h:a.EVISINA,d:a.EDUBINA});
       const f={
         name:(par?par.name+' / ':'')+nm,
@@ -812,13 +837,14 @@ function parseCorpus(text){
         path:[...(par?par.path:[]),++fid],
         cab:par?par.cab:out.cabs.length-1,
         fr:!!((par&&par.fr)||/fronta/i.test(a.ECLAS||'')||a.ETIPE==='7'),
+        wall:isWall,
         tp:a.ETIPE||'',
         skip:false
       };
       if(tag==='ELM'&&(a.ETIPE==='16'||/nozka|nóżk/i.test(nm))){
         const r=25,h=num(a.EVISINA,100);
         out.push({
-          name:nm,parent:par?par.name:'',mat:'Nóżka',shape:'cyl',
+          name:nm,parent:par?par.name:'',mat:'Nóżka',shape:'cyl',wall:isWall,
           path:f.path,cab:f.cab,m:[-r,0,-r],s:[2*r,h,2*r],M:M.toArray()
         });
       }
@@ -826,9 +852,8 @@ function parseCorpus(text){
     }else if(tag==='AD'&&!close){
       const a=attrs(body);
       if(a.VISIBLE==='false')continue;
-      const f=stack[stack.length-1]||{name:'(bez elementu)',short:'',M:new THREE.Matrix4(),cab:0,fr:false,tp:'',skip:false};
+      const f=stack[stack.length-1]||{name:'(bez elementu)',short:'',M:new THREE.Matrix4(),cab:0,fr:false,wall:false,tp:'',skip:false};
       if(f.skip)continue;
-      // nóżka jest już rysowana jako walec; makra okuć (np. Makro_AXILO 1×1×1) nie są formatkami
       if(f.tp==='16'||/^makro/i.test(a.DNAME||''))continue;
       const T=num(a.DEBLJINA),H=num(a.VISINA),D=num(a.DUBINA),sm=Math.round(num(a.SMJER));
       let s,zFrontDepth=true;
@@ -838,13 +863,15 @@ function parseCorpus(text){
       const x=num(a.DXPOS),y=num(a.DYPOS),z=num(a.DZPOS);
       const zmin=zFrontDepth?z-s[2]:z;
       if(Math.min(...s)<0.5)continue;
+      const isWall=!!(f.wall||/(^|[^a-z0-9])(sciana|ściana|wall|zid)([^a-z0-9]|$)/i.test(a.DNAME||''));
       out.push({
         name:(stack.length>1?f.short+': ':'')+(a.DNAME||'Formatka'),
         parent:f.name,
         mat:a.MATNAME||'',
         cab:f.cab,
         path:f.path,
-        fr:!!(f.fr||(a.TIPFRONTE&&a.TIPFRONTE!=='0')||/^front$/i.test(a.DNAME||'')),
+        fr:!!(!isWall&&(f.fr||(a.TIPFRONTE&&a.TIPFRONTE!=='0')||/^front$/i.test(a.DNAME||''))),
+        wall:isWall,
         m:[x,y,zmin],
         s,
         M:f.M.toArray()
@@ -900,7 +927,7 @@ async function loadById(id){
   }
   showLoader('Ładowanie projektu z Dysku Google…','Identyfikator pliku: '+id);
   const ac=new AbortController();
-  const to=setTimeout(()=>ac.abort(),90000);   // obejmuje też pobieranie treści
+  const to=setTimeout(()=>ac.abort(),90000);
   try{
     const sep=SCRIPT_URL.includes('?')?'&':'?';
     const r=await fetch(SCRIPT_URL+sep+'id='+encodeURIComponent(id),{signal:ac.signal});
@@ -920,7 +947,6 @@ async function loadById(id){
   }
 }
 
-/* ---------- start ---------- */
 $('lretry').onclick=()=>lastTry&&lastTry();
 $('lclose').onclick=hideLoader;
 
@@ -928,7 +954,7 @@ const libsOk=typeof THREE!=='undefined'&&typeof THREE.OrbitControls!=='undefined
   &&typeof JSZip!=='undefined'&&typeof pako!=='undefined';
 
 if(!libsOk){
-  showErr('Nie udało się załadować bibliotek podglądu','Sprawdź połączenie z internetem (cdnjs.cloudflare.com, cdn.jsdelivr.net) i odśwież stronę.',null);
+  showErr('Nie udało się załadować bibliotek podglądu','Sprawdź połączenie z internetem i odśwież stronę.',null);
 }else{
   let ok=true;
   try{init()}catch(err){
@@ -969,6 +995,7 @@ if(!libsOk){
       });
       xray=false;
       $('cFr').checked=false;
+      $('cWa').checked=false;
       $('bX').classList.remove('on');
       refresh();
       recalcBoundsAndCamera('iso',false);
@@ -976,6 +1003,10 @@ if(!libsOk){
     $('ex').oninput=applyExplode;
     $('cFr').onchange=()=>{
       if($('cFr').checked&&sel>=0&&boards[sel].fr)clearSel();
+      refresh();
+    };
+    $('cWa').onchange=()=>{
+      if($('cWa').checked&&sel>=0&&boards[sel].wall)clearSel();
       refresh();
     };
 
