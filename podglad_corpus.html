@@ -154,7 +154,10 @@ function makeWallHatchTexture(){
   return tex;
 }
 
-function parseCurveSection(seg){
+function parseOutlinePoints(krData){
+  if(!krData||krData.indexOf('PTX=')<0)return [];
+  const match=krData.match(/CURVE=-1\b([\s\S]*?)(?:,CURVE=|$)/);
+  const seg=match?match[1]:krData;
   const parts=seg.split(',');
   const pts=[];
   let cur=null;
@@ -173,12 +176,6 @@ function parseCurveSection(seg){
     }
   }
   return pts.filter(p=>Number.isFinite(p.x)&&Number.isFinite(p.z));
-}
-
-function parseOutlinePoints(krData){
-  if(!krData||krData.indexOf('PTX=')<0)return [];
-  const match=krData.match(/CURVE=-1\b([\s\S]*?)(?:,CURVE=|$)/);
-  return parseCurveSection(match?match[1]:krData);
 }
 
 function hasCustomContour(pts){
@@ -233,7 +230,7 @@ function makeCutoutGeometry(d){
   const W=d.s[0], H=d.s[1], T=d.s[2];
   const sx=H/spanX, sz=W/spanZ;
   pts.forEach((p,idx)=>{
-    const u=-((p.z-minZ)*sz-W/2)*S;
+    const u=((p.z-minZ)*sz-W/2)*S;
     const v=((p.x-minX)*sx-H/2)*S;
     if(idx===0)shape.moveTo(u,v);
     else shape.lineTo(u,v);
