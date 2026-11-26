@@ -179,7 +179,7 @@ function parseOutlinePoints(krData){
 }
 
 function hasCustomContour(pts){
-  if(pts.length<5)return false;
+  if(pts.length<4)return false;
   let minX=Infinity,maxX=-Infinity,minZ=Infinity,maxZ=-Infinity;
   for(const p of pts){
     if(p.x<minX)minX=p.x;
