@@ -154,10 +154,7 @@ function makeWallHatchTexture(){
   return tex;
 }
 
-function parseOutlinePoints(krData){
-  if(!krData||krData.indexOf('PTX=')<0)return [];
-  const match=krData.match(/CURVE=-1\b([\s\S]*?)(?:,CURVE=|$)/);
-  const seg=match?match[1]:krData;
+function parseCurveSection(seg){
   const parts=seg.split(',');
   const pts=[];
   let cur=null;
@@ -178,6 +175,24 @@ function parseOutlinePoints(krData){
   return pts.filter(p=>Number.isFinite(p.x)&&Number.isFinite(p.z));
 }
 
+function parseOutlinePoints(krData){
+  if(!krData||krData.indexOf('PTX=')<0)return [];
+  const match=krData.match(/CURVE=-1\b([\s\S]*?)(?:,CURVE=|$)/);
+  return parseCurveSection(match?match[1]:krData);
+}
+
+function parseHoleContours(krData){
+  if(!krData||krData.indexOf('CURVE=')<0)return [];
+  const holes=[];
+  const re=/\bCURVE=(\d+)\b([\s\S]*?)(?:,CURVE=|$)/g;
+  let m;
+  while((m=re.exec(krData))){
+    const pts=parseCurveSection(m[2]);
+    if(pts.length>=3)holes.push(pts);
+  }
+  return holes;
+}
+
 function hasCustomContour(pts){
   if(pts.length<5)return false;
   let minX=Infinity,maxX=-Infinity,minZ=Infinity,maxZ=-Infinity;
@@ -194,7 +209,8 @@ function makeCutoutGeometry(d){
   if(d.shape==='cyl'||!d.curveData)return null;
   if(d.sm!==0&&d.sm!==1)return null;
   const pts=parseOutlinePoints(d.curveData);
-  if(!hasCustomContour(pts))return null;
+  const holes=parseHoleContours(d.curveData);
+  if(!hasCustomContour(pts)&&!holes.length)return null;
 
   let minX=Infinity,maxX=-Infinity,minZ=Infinity,maxZ=-Infinity;
   for(const p of pts){
@@ -227,16 +243,28 @@ function makeCutoutGeometry(d){
     return geo;
   }
 
-  // sm===1: d.s = [D, H, T], w przestrzeni lokalnej X odpowiada szerokości (d.s[0]), Y wysokości (d.s[1]), Z grubości (d.s[2])
+  // sm===1: d.s = [D, H, T], u = szerokość (odwrócona względem PTZ), v = wysokość (odwrócona względem PTX)
   const W=d.s[0], H=d.s[1], T=d.s[2];
   const sx=H/spanX, sz=W/spanZ;
   pts.forEach((p,idx)=>{
-    const u=((p.z-minZ)*sz-W/2)*S;
-    const v=((p.x-minX)*sx-H/2)*S;
+    const u=-((p.z-minZ)*sz-W/2)*S;
+    const v=-((p.x-minX)*sx-H/2)*S;
     if(idx===0)shape.moveTo(u,v);
     else shape.lineTo(u,v);
   });
   shape.closePath();
+
+  holes.forEach(hpts=>{
+    const hole=new THREE.Path();
+    hpts.forEach((p,idx)=>{
+      const u=-((p.z-minZ)*sz-W/2)*S;
+      const v=-((p.x-minX)*sx-H/2)*S;
+      if(idx===0)hole.moveTo(u,v);
+      else hole.lineTo(u,v);
+    });
+    hole.closePath();
+    shape.holes.push(hole);
+  });
 
   const geo=new THREE.ExtrudeGeometry(shape,{
     depth:T*S,
