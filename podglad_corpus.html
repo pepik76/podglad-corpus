@@ -234,7 +234,7 @@ function makeCutoutGeometry(d){
   return geo;
 }
 
-function geoFor(d){
+function geoFor(d,withEdges){
   const key=d.shape==='cyl'
     ?'c'+d.s[0]+'_'+d.s[1]
     :'b'+d.s.join('_')+(d.sm===0&&d.curveData?'_k'+d.curveData.length:'');
@@ -243,8 +243,10 @@ function geoFor(d){
     const geo=d.shape==='cyl'
       ?new THREE.CylinderGeometry(d.s[0]/2*S,d.s[0]/2*S,d.s[1]*S,24)
       :(makeCutoutGeometry(d)||new THREE.BoxGeometry(d.s[0]*S,d.s[1]*S,d.s[2]*S));
-    g={geo,edges:new THREE.EdgesGeometry(geo,28)};
+    g={geo,edges:withEdges?new THREE.EdgesGeometry(geo,28):null};
     geoCache.set(key,g);
+  }else if(withEdges&&!g.edges){
+    g.edges=new THREE.EdgesGeometry(g.geo,28);
   }
   return g;
 }
@@ -264,7 +266,7 @@ function matFor(col,st,isWall){
 }
 function disposeScene(){
   while(group.children.length)group.remove(group.children[0]);
-  geoCache.forEach(g=>{g.geo.dispose();g.edges.dispose()});geoCache.clear();
+  geoCache.forEach(g=>{g.geo.dispose();if(g.edges)g.edges.dispose()});geoCache.clear();
   matCache.forEach(m=>m.dispose());matCache.clear();
 }
 
@@ -360,12 +362,14 @@ function build(list,label){
   clearSel();
   listCab=-2;
 
+  const withEdges=list.length<=250;
+
   list.forEach((d,i)=>{
     const M=new THREE.Matrix4();
     if(d.M)M.fromArray(d.M);
 
     const col=colorFor(d);
-    const g=geoFor(d);
+    const g=geoFor(d,withEdges);
     const m=new THREE.Mesh(g.geo,matFor(col,'n',!!d.wall));
     const c=new THREE.Vector3(d.m[0]+d.s[0]/2,d.m[1]+d.s[1]/2,d.m[2]+d.s[2]/2)
       .applyMatrix4(M)
@@ -374,8 +378,11 @@ function build(list,label){
     m.quaternion.setFromRotationMatrix(M);
     m.userData.i=i;
 
-    const e=new THREE.LineSegments(g.edges,edgeMats.n);
-    m.add(e);
+    let e=null;
+    if(g.edges){
+      e=new THREE.LineSegments(g.edges,edgeMats.n);
+      m.add(e);
+    }
     group.add(m);
 
     boards.push(Object.assign({},d,{mesh:m,edge:e,base:c.clone(),hidden:false,col,st:'n'}));
@@ -751,7 +758,7 @@ function refresh(){
     if(b.st!==st){
       b.st=st;
       b.mesh.material=matFor(b.col,st,!!b.wall);
-      b.edge.material=s?edgeMats.s:edgeMats.n;
+      if(b.edge)b.edge.material=s?edgeMats.s:edgeMats.n;
     }
   });
 
@@ -883,12 +890,23 @@ function parseCorpus(text){
   out.cabs=[];
   let fid=0, lastAd=null;
   const elmClose=/<\/ELM\s*>/.test(text);
-  const re=/<(\/?)(ELEMENT|ELM|AD|KRIVULJE)(?=[\s\/>])((?:"[^"]*"|[^>"])*)>/g;
+  const re=/<(\/?)(ELEMENT|ELM|AD|KRIVULJE|ELINKS|EFVK|SELBOX|POTROSNI|RUPE|DKOTE)(?=[\s\/>])((?:"[^"]*"|[^>"])*)>/g;
   const rad=Math.PI/180;
   let m;
 
   while((m=re.exec(text))){
     const close=m[1]==='/', tag=m[2], body=m[3], self=/\/\s*$/.test(body);
+
+    // szybkie przeskakiwanie ciężkich bloków bez parsowania wnętrza
+    if(tag==='ELINKS'||tag==='EFVK'||tag==='SELBOX'||tag==='POTROSNI'||tag==='RUPE'||tag==='DKOTE'){
+      if(!close&&!self){
+        const endTag='</'+tag+'>';
+        const endIdx=text.indexOf(endTag,re.lastIndex);
+        if(endIdx>=0)re.lastIndex=endIdx+endTag.length;
+      }
+      continue;
+    }
+
     if(tag==='KRIVULJE'){
       if(!close&&lastAd&&!lastAd.curveData){
         const dm=body.match(/\bDATA\s*=\s*(?:"([^"]*)"|'([^']*)')/i);
@@ -896,6 +914,7 @@ function parseCorpus(text){
       }
       continue;
     }
+
     if(tag==='ELEMENT'||tag==='ELM'){
       lastAd=null;
       if(tag==='ELM'&&!elmClose)continue;
