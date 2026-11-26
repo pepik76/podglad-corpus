@@ -156,14 +156,17 @@ function makeWallHatchTexture(){
 
 function parseOutlinePoints(krData){
   if(!krData||krData.indexOf('PTX=')<0)return [];
-  const match=krData.match(/CURVE=-1\b([\s\S]*?)(?:,CURVE=|$)/);
-  const seg=match?match[1]:krData;
+  const startIdx=krData.search(/CURVE\s*=\s*"?-1\b/i);
+  let seg=startIdx>=0?krData.slice(startIdx):krData;
+  const nextCurveIdx=seg.slice(1).search(/,?\s*CURVE\s*=/i);
+  if(nextCurveIdx>=0)seg=seg.slice(0,nextCurveIdx+1);
+
   const parts=seg.split(',');
   const pts=[];
   let cur=null;
 
   for(let i=0;i<parts.length;i++){
-    const item=parts[i].replace(/^"+|"+$/g,'');
+    const item=parts[i].replace(/^"+|"+$/g,'').trim();
     if(item.startsWith('PTOCKA=')){
       cur={x:0,z:0};
       pts.push(cur);
@@ -203,24 +206,28 @@ function makeCutoutGeometry(d){
     if(p.z<minZ)minZ=p.z;
     if(p.z>maxZ)maxZ=p.z;
   }
-  const spanX=Math.max(maxX-minX,1), spanZ=Math.max(maxZ-minZ,1);
+  const spanX=Math.max(maxX-minX,1);
   const shape=new THREE.Shape();
 
   if(d.sm===0){
     const H=d.s[1], D=d.s[2], T=d.s[0];
-    const sx=H/spanX, sz=D/spanZ;
-    pts.forEach((p,idx)=>{
-      const u=-((p.z-minZ)*sz-D/2)*S;
-      const v=((p.x-minX)*sx-H/2)*S;
-      if(idx===0)shape.moveTo(u,v);
-      else shape.lineTo(u,v);
+    const h0=((pts[0].x-minX)/spanX)*H;
+    const h1=((pts[1].x-minX)/spanX)*H;
+    const h2=((pts[2].x-minX)/spanX)*H;
+    const h3=((pts[3].x-minX)/spanX)*H;
+    const poly=[
+      {u: D/2, v: h0-H/2},
+      {u: D/2, v: h1-H/2},
+      {u:-D/2, v: h2-H/2},
+      {u:-D/2, v: h3-H/2}
+    ];
+    poly.forEach((p,idx)=>{
+      if(idx===0)shape.moveTo(p.u*S,p.v*S);
+      else shape.lineTo(p.u*S,p.v*S);
     });
     shape.closePath();
 
-    const geo=new THREE.ExtrudeGeometry(shape,{
-      depth:T*S,
-      bevelEnabled:false
-    });
+    const geo=new THREE.ExtrudeGeometry(shape,{depth:T*S,bevelEnabled:false});
     geo.translate(0,0,-(T*S)/2);
     geo.rotateY(-Math.PI/2);
     geo.computeBoundingBox();
@@ -228,19 +235,23 @@ function makeCutoutGeometry(d){
   }
 
   const W=d.s[0], H=d.s[1], T=d.s[2];
-  const sx=H/spanX, sz=W/spanZ;
-  pts.forEach((p,idx)=>{
-    const u=((p.z-minZ)*sz-W/2)*S;
-    const v=((p.x-minX)*sx-H/2)*S;
-    if(idx===0)shape.moveTo(u,v);
-    else shape.lineTo(u,v);
+  const x0=((pts[0].x-minX)/spanX)*H;
+  const x1=((pts[1].x-minX)/spanX)*H;
+  const x2=((pts[2].x-minX)/spanX)*H;
+  const x3=((pts[3].x-minX)/spanX)*H;
+  const poly=[
+    {u:-W/2, v: x0-H/2},
+    {u:-W/2, v: x1-H/2},
+    {u: W/2, v: x2-H/2},
+    {u: W/2, v: x3-H/2}
+  ];
+  poly.forEach((p,idx)=>{
+    if(idx===0)shape.moveTo(p.u*S,p.v*S);
+    else shape.lineTo(p.u*S,p.v*S);
   });
   shape.closePath();
 
-  const geo=new THREE.ExtrudeGeometry(shape,{
-    depth:T*S,
-    bevelEnabled:false
-  });
+  const geo=new THREE.ExtrudeGeometry(shape,{depth:T*S,bevelEnabled:false});
   geo.translate(0,0,-(T*S)/2);
   geo.computeBoundingBox();
   return geo;
