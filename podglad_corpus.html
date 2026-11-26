@@ -190,7 +190,7 @@ function hasCustomContour(pts){
     if(p.z<minZ)minZ=p.z;
     if(p.z>maxZ)maxZ=p.z;
   }
-  return (maxX-minX)>=10&&(maxZ-minZ)>=10;
+  return (maxX-minX)>=10||(maxZ-minZ)>=10;
 }
 
 function makeCutoutGeometry(d){
@@ -207,23 +207,16 @@ function makeCutoutGeometry(d){
     if(p.z>maxZ)maxZ=p.z;
   }
   const spanX=Math.max(maxX-minX,1);
+  const spanZ=Math.max(maxZ-minZ,1);
   const shape=new THREE.Shape();
 
   if(d.sm===0){
     const H=d.s[1], D=d.s[2], T=d.s[0];
-    const h0=((pts[0].x-minX)/spanX)*H;
-    const h1=((pts[1].x-minX)/spanX)*H;
-    const h2=((pts[2].x-minX)/spanX)*H;
-    const h3=((pts[3].x-minX)/spanX)*H;
-    const poly=[
-      {u: D/2, v: h0-H/2},
-      {u: D/2, v: h1-H/2},
-      {u:-D/2, v: h2-H/2},
-      {u:-D/2, v: h3-H/2}
-    ];
-    poly.forEach((p,idx)=>{
-      if(idx===0)shape.moveTo(p.u*S,p.v*S);
-      else shape.lineTo(p.u*S,p.v*S);
+    pts.forEach((p,idx)=>{
+      const u=-(((p.z-minZ)/spanZ)*D-D/2)*S;
+      const v=(((p.x-minX)/spanX)*H-H/2)*S;
+      if(idx===0)shape.moveTo(u,v);
+      else shape.lineTo(u,v);
     });
     shape.closePath();
 
@@ -235,19 +228,11 @@ function makeCutoutGeometry(d){
   }
 
   const W=d.s[0], H=d.s[1], T=d.s[2];
-  const x0=((pts[0].x-minX)/spanX)*H;
-  const x1=((pts[1].x-minX)/spanX)*H;
-  const x2=((pts[2].x-minX)/spanX)*H;
-  const x3=((pts[3].x-minX)/spanX)*H;
-  const poly=[
-    {u:-W/2, v: x0-H/2},
-    {u:-W/2, v: x1-H/2},
-    {u: W/2, v: x2-H/2},
-    {u: W/2, v: x3-H/2}
-  ];
-  poly.forEach((p,idx)=>{
-    if(idx===0)shape.moveTo(p.u*S,p.v*S);
-    else shape.lineTo(p.u*S,p.v*S);
+  pts.forEach((p,idx)=>{
+    const u=(((p.z-minZ)/spanZ)*W-W/2)*S;
+    const v=(((p.x-minX)/spanX)*H-H/2)*S;
+    if(idx===0)shape.moveTo(u,v);
+    else shape.lineTo(u,v);
   });
   shape.closePath();
 
