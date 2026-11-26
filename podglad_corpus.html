@@ -154,13 +154,79 @@ function makeWallHatchTexture(){
   return tex;
 }
 
+function parseCurvePoints(krData){
+  if(!krData)return [];
+  const match=krData.match(/CURVE=-1\b([\s\S]*?)(?:,CURVE=|$)/);
+  const seg=match?match[1]:krData;
+  const parts=seg.split(',');
+  const pts=[];
+  let cur=null;
+
+  for(const raw of parts){
+    const item=raw.replace(/^"+|"+$/g,'');
+    if(item.startsWith('PTOCKA=')){
+      cur={x:0,z:0,style:0,arcR:0};
+      pts.push(cur);
+    }else if(!cur){
+      continue;
+    }else if(item.startsWith('PTX=')){
+      cur.x=num(item.slice(4))*1000;
+    }else if(item.startsWith('PTZ=')){
+      cur.z=num(item.slice(4))*1000;
+    }else if(item.startsWith('PTSTYLE=')){
+      cur.style=Math.round(num(item.slice(8)));
+    }else if(item.startsWith('PTARRA=')){
+      cur.arcR=num(item.slice(7))*1000;
+    }
+  }
+  return pts.filter(p=>Number.isFinite(p.x)&&Number.isFinite(p.z));
+}
+
+function makeProfileGeometry(d){
+  const isProfile=/profil.*zobal|zobal.*profil/i.test((d.parent||'')+' '+(d.name||''));
+  if(!isProfile)return null;
+  const pts=parseCurvePoints(d.curveData);
+  if(pts.length<3)return null;
+
+  const shape=new THREE.Shape();
+  shape.moveTo(pts[0].x*S,pts[0].z*S);
+  for(let i=1;i<pts.length;i++){
+    const prev=pts[i-1], curr=pts[i];
+    if(prev.style===2&&prev.arcR>0.05){
+      const dx=curr.x-prev.x, dz=curr.z-prev.z;
+      const chord=Math.hypot(dx,dz);
+      const r=Math.max(prev.arcR,chord/2+0.01);
+      const midX=(prev.x+curr.x)/2, midZ=(prev.z+curr.z)/2;
+      const h=Math.sqrt(Math.max(0,r*r-(chord/2)*(chord/2)));
+      const nx=chord>1e-6?-dz/chord:0, nz=chord>1e-6?dx/chord:0;
+      shape.quadraticCurveTo((midX+nx*h)*S,(midZ+nz*h)*S,curr.x*S,curr.z*S);
+    }else{
+      shape.lineTo(curr.x*S,curr.z*S);
+    }
+  }
+  shape.closePath();
+
+  const lenMm=Math.max(...d.s);
+  const extrude=new THREE.ExtrudeGeometry(shape,{
+    depth:lenMm*S,
+    bevelEnabled:false,
+    curveSegments:12
+  });
+  extrude.rotateY(Math.PI/2);
+  extrude.computeBoundingBox();
+  return extrude;
+}
+
 function geoFor(d){
-  const key=d.shape==='cyl'?'c'+d.s[0]+'_'+d.s[1]:'b'+d.s.join('_');
+  const isProfile=/profil.*zobal|zobal.*profil/i.test((d.parent||'')+' '+(d.name||''));
+  const key=isProfile&&d.curveData
+    ?'p_'+d.name+'_'+d.s.join('_')+'_'+d.curveData.slice(0,120)
+    :(d.shape==='cyl'?'c'+d.s[0]+'_'+d.s[1]:'b'+d.s.join('_'));
   let g=geoCache.get(key);
   if(!g){
     const geo=d.shape==='cyl'
       ?new THREE.CylinderGeometry(d.s[0]/2*S,d.s[0]/2*S,d.s[1]*S,24)
-      :new THREE.BoxGeometry(d.s[0]*S,d.s[1]*S,d.s[2]*S);
+      :(makeProfileGeometry(d)||new THREE.BoxGeometry(d.s[0]*S,d.s[1]*S,d.s[2]*S));
     g={geo,edges:new THREE.EdgesGeometry(geo,28)};
     geoCache.set(key,g);
   }
@@ -260,7 +326,7 @@ function resize(){
 function colorFor(b){
   if(b.wall)return 0xc7d0d8;
   const n=(b.name||'').toLowerCase(),p=(b.parent||'').toLowerCase();
-  if(/uchwyt/.test(p+n))return 0x8d98a5;
+  if(/uchwyt|profil/.test(p+n))return 0x8d98a5;
   if(b.fr)return 0x5b8fd9;
   if(b.shape==='cyl'||/nozka|nóżk|stopk|axilo/.test(p+n))return 0x2b2f33;
   if(/front|drzw|czo[lł]o|fr_/.test(n))return 0x5b8fd9;
@@ -853,6 +919,13 @@ function parseCorpus(text){
       const f=stack[stack.length-1]||{name:'(bez elementu)',short:'',M:new THREE.Matrix4(),cab:0,fr:false,wall:false,tp:'',skip:false};
       if(f.skip)continue;
       if(f.tp==='16'||/^makro/i.test(a.DNAME||''))continue;
+
+      const tail=text.slice(re.lastIndex,re.lastIndex+4500);
+      const endAd=tail.search(/<\/AD\s*>|<AD\b|<\/DASKE\s*>/);
+      const adSlice=endAd>=0?tail.slice(0,endAd):tail;
+      const krMatch=adSlice.match(/<KRIVULJE\b[^>]*\bDATA=(?:"([^"]*)"|'([^']*)')/i);
+      const curveData=krMatch?unent(krMatch[1]!==undefined?krMatch[1]:krMatch[2]):'';
+
       const T=num(a.DEBLJINA),H=num(a.VISINA),D=num(a.DUBINA),sm=Math.round(num(a.SMJER));
       let s,zFrontDepth=true;
       if(sm===1){s=[D,H,T];zFrontDepth=false}
@@ -871,6 +944,7 @@ function parseCorpus(text){
         wall:!!f.wall,
         m:[x,y,zmin],
         s,
+        curveData,
         M:f.M.toArray()
       });
     }
