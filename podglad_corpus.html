@@ -792,10 +792,8 @@ function attrs(s){
   return o;
 }
 
-function isWallTag(a,nm){
-  if(a.ETIPE==='12')return true;
-  const txt=((nm||'')+' '+(a.ECLAS||'')+' '+(a.EIMPORTNAME||'')).toLowerCase();
-  return /(^|[^a-z0-9])(sciana|ściana|wall|zid)([^a-z0-9]|$)/i.test(txt);
+function isWallTag(a){
+  return a.ETIPE==='12';
 }
 
 function parseCorpus(text){
@@ -828,7 +826,7 @@ function parseCorpus(text){
       );
       const M=(par?par.M.clone():new THREE.Matrix4()).multiply(T).multiply(R);
       const nm=a.ENAME||a.NAME||a.ELNAME||(tag==='ELM'?'ELM':'Element');
-      const isWall=!!((par&&par.wall)||isWallTag(a,nm));
+      const isWall=!!((par&&par.wall)||isWallTag(a));
       if(!par)out.cabs.push({name:nm,w:a.ESIRINA,h:a.EVISINA,d:a.EDUBINA});
       const f={
         name:(par?par.name+' / ':'')+nm,
@@ -863,15 +861,14 @@ function parseCorpus(text){
       const x=num(a.DXPOS),y=num(a.DYPOS),z=num(a.DZPOS);
       const zmin=zFrontDepth?z-s[2]:z;
       if(Math.min(...s)<0.5)continue;
-      const isWall=!!(f.wall||/(^|[^a-z0-9])(sciana|ściana|wall|zid)([^a-z0-9]|$)/i.test(a.DNAME||''));
       out.push({
         name:(stack.length>1?f.short+': ':'')+(a.DNAME||'Formatka'),
         parent:f.name,
         mat:a.MATNAME||'',
         cab:f.cab,
         path:f.path,
-        fr:!!(!isWall&&(f.fr||(a.TIPFRONTE&&a.TIPFRONTE!=='0')||/^front$/i.test(a.DNAME||''))),
-        wall:isWall,
+        fr:!!(!f.wall&&(f.fr||(a.TIPFRONTE&&a.TIPFRONTE!=='0')||/^front$/i.test(a.DNAME||''))),
+        wall:!!f.wall,
         m:[x,y,zmin],
         s,
         M:f.M.toArray()
