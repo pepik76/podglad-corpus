@@ -1053,7 +1053,22 @@ async function loadById(id){
     const j=await r.json();
     clearTimeout(to);
     if(j.error)throw new Error(j.error);
-    if(!j.base64)throw new Error('odpowiedź skryptu nie zawiera danych base64');
+
+    if(Array.isArray(j.parts)){
+      if(!j.parts.length){
+        showErr('Nie znaleziono żadnych formatek w tym pliku.','Sprawdź zawartość pliku z programu Corpus.',null);
+        return;
+      }
+      const list=j.parts;
+      list.cabs=Array.isArray(j.cabs)&&j.cabs.length
+        ?j.cabs
+        :[{name:j.name||'Projekt'}];
+      build(list,j.name||'projekt.s3d');
+      hideLoader();
+      return;
+    }
+
+    if(!j.base64)throw new Error('odpowiedź skryptu nie zawiera danych projektu');
     const bin=atob(j.base64);
     const u8=new Uint8Array(bin.length);
     for(let k=0;k<bin.length;k++)u8[k]=bin.charCodeAt(k);
