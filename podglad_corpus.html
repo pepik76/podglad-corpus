@@ -242,6 +242,14 @@ function makeCutoutGeometry(d){
   return geo;
 }
 
+function shouldDrawEdges(d,totalCount){
+  if(d.wall)return false;
+  if(d.shape==='cyl')return false;
+  const maxDim=Math.max(d.s[0]||0,d.s[1]||0,d.s[2]||0);
+  if(totalCount>400&&maxDim<60)return false;
+  return true;
+}
+
 function geoFor(d,withEdges){
   const key=d.shape==='cyl'
     ?'c'+d.s[0]+'_'+d.s[1]
@@ -249,7 +257,7 @@ function geoFor(d,withEdges){
   let g=geoCache.get(key);
   if(!g){
     const geo=d.shape==='cyl'
-      ?new THREE.CylinderGeometry(d.s[0]/2*S,d.s[0]/2*S,d.s[1]*S,24)
+      ?new THREE.CylinderGeometry(d.s[0]/2*S,d.s[0]/2*S,d.s[1]*S,18)
       :(makeCutoutGeometry(d)||new THREE.BoxGeometry(d.s[0]*S,d.s[1]*S,d.s[2]*S));
     g={geo,edges:withEdges?new THREE.EdgesGeometry(geo,28):null};
     geoCache.set(key,g);
@@ -287,7 +295,7 @@ function init(){
   scene.background=new THREE.Color(0xeef1f4);
   cam=new THREE.PerspectiveCamera(40,1,.01,200);
   ren=new THREE.WebGLRenderer({antialias:true});
-  ren.setPixelRatio(Math.min(devicePixelRatio,2));
+  ren.setPixelRatio(Math.min(devicePixelRatio,1.5));
   v.appendChild(ren.domElement);
 
   ctl=new THREE.OrbitControls(cam,ren.domElement);
@@ -370,13 +378,14 @@ function build(list,label){
   clearSel();
   listCab=-2;
 
-  const withEdges=true;
+  const totalCount=list.length;
 
   list.forEach((d,i)=>{
     const M=new THREE.Matrix4();
     if(d.M)M.fromArray(d.M);
 
     const col=colorFor(d);
+    const withEdges=shouldDrawEdges(d,totalCount);
     const g=geoFor(d,withEdges);
     const m=new THREE.Mesh(g.geo,matFor(col,'n',!!d.wall));
     const c=new THREE.Vector3(d.m[0]+d.s[0]/2,d.m[1]+d.s[1]/2,d.m[2]+d.s[2]/2)
@@ -482,7 +491,7 @@ function stepAnim(){
 function initCube(){
   const box=$('cube'),N=112;
   cubeRen=new THREE.WebGLRenderer({antialias:true,alpha:true});
-  cubeRen.setPixelRatio(Math.min(devicePixelRatio,2));
+  cubeRen.setPixelRatio(Math.min(devicePixelRatio,1.5));
   cubeRen.setSize(N,N);
   box.appendChild(cubeRen.domElement);
 
@@ -999,7 +1008,7 @@ function parseCorpus(text){
   return out;
 }
 
-const paint=()=>new Promise(r=>setTimeout(r,40));
+const paint=()=>new Promise(r=>setTimeout(r,20));
 function showLoader(txt,sub){
   const l=$('loader');
   l.classList.remove('err');
@@ -1053,22 +1062,7 @@ async function loadById(id){
     const j=await r.json();
     clearTimeout(to);
     if(j.error)throw new Error(j.error);
-
-    if(Array.isArray(j.parts)){
-      if(!j.parts.length){
-        showErr('Nie znaleziono żadnych formatek w tym pliku.','Sprawdź zawartość pliku z programu Corpus.',null);
-        return;
-      }
-      const list=j.parts;
-      list.cabs=Array.isArray(j.cabs)&&j.cabs.length
-        ?j.cabs
-        :[{name:j.name||'Projekt'}];
-      build(list,j.name||'projekt.s3d');
-      hideLoader();
-      return;
-    }
-
-    if(!j.base64)throw new Error('odpowiedź skryptu nie zawiera danych projektu');
+    if(!j.base64)throw new Error('odpowiedź skryptu nie zawiera danych base64');
     const bin=atob(j.base64);
     const u8=new Uint8Array(bin.length);
     for(let k=0;k<bin.length;k++)u8[k]=bin.charCodeAt(k);
